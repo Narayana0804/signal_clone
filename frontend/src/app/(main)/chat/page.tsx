@@ -1,30 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { useContacts } from "@/hooks/useContacts";
+import { useWebSocket, WSEventEnvelope } from "@/hooks/useWebSocket";
 import { ConversationSidebar } from "@/features/conversations/ConversationSidebar";
-import { ChatPanePlaceholder } from "@/features/conversations/ChatPanePlaceholder";
+import { ChatPane } from "@/features/conversations/ChatPane";
 import { ContactList } from "@/features/contacts/ContactList";
-import { X, UserCheck, MessageSquarePlus, LogOut } from "lucide-react";
+import { X, MessageSquarePlus } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 
 export default function ChatPage() {
   const router = useRouter();
-  const { currentUser, loading: authLoading, logout } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const {
     conversations,
     selectedConversation,
     selectedConversationId,
     selectConversation,
     createDirectConversation,
+    fetchConversations,
   } = useConversations();
-  const { contacts, searchResults, searchUsers } = useContacts();
+  const { contacts } = useContacts();
 
   const [showContactsModal, setShowContactsModal] = useState(false);
-  const [modalSearchQuery, setModalSearchQuery] = useState("");
+
+  // WebSocket event handler
+  const handleWSEvent = useCallback(
+    (event: WSEventEnvelope) => {
+      if (event.type === "message.created" || event.type === "message.read") {
+        // Refresh conversation list preview & message lists
+        fetchConversations();
+      }
+    },
+    [fetchConversations]
+  );
+
+  useWebSocket(handleWSEvent);
 
   useEffect(() => {
     if (!authLoading && !currentUser) {
@@ -68,7 +82,7 @@ export default function ChatPage() {
       />
 
       {/* Main Chat View */}
-      <ChatPanePlaceholder conversation={selectedConversation} />
+      <ChatPane conversation={selectedConversation} currentUser={currentUser} />
 
       {/* Contacts / Start Chat Modal */}
       {showContactsModal && (

@@ -9,10 +9,12 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.conversation import Conversation
 from app.models.user import User
+from app.repositories.message_repo import MessageRepository
 from app.schemas.conversation import (
     ConversationListResponse,
     ConversationResponse,
     CreateConversationRequest,
+    LastMessagePreview,
     ParticipantResponse,
 )
 from app.schemas.user import UserResponse
@@ -21,8 +23,10 @@ from app.services.conversation_service import ConversationService
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
 
-def build_conversation_response(conv: Conversation, current_user_id: str) -> ConversationResponse:
-    """Format ORM Conversation model into API response, populating other_user for DIRECT chats."""
+async def build_conversation_response(
+    conv: Conversation, current_user_id: str, db: AsyncSession
+) -> ConversationResponse:
+    """Format ORM Conversation model into API response, populating other_user, last_message, and unread_count."""
     participants_out = []
     other_user_out = None
 
@@ -45,6 +49,23 @@ def build_conversation_response(conv: Conversation, current_user_id: str) -> Con
     if conv.type == "DIRECT" and not display_name and other_user_out:
         display_name = other_user_out.display_name
 
+    # Fetch last message and unread count from MessageRepository
+    msg_repo = MessageRepository(db)
+    last_msg = await msg_repo.get_last_message(conv.id)
+    unread_count = await msg_repo.get_unread_count(conv.id, current_user_id)
+
+    last_msg_out = None
+    if last_msg:
+        sender_name = last_msg.sender.display_name if last_msg.sender else "Unknown"
+        last_msg_out = LastMessagePreview(
+            id=last_msg.id,
+            content=last_msg.content,
+            sender_id=last_msg.sender_id,
+            sender_name=sender_name,
+            created_at=last_msg.created_at,
+            message_type=last_msg.message_type,
+        )
+
     return ConversationResponse(
         id=conv.id,
         type=conv.type,
@@ -54,8 +75,8 @@ def build_conversation_response(conv: Conversation, current_user_id: str) -> Con
         updated_at=conv.updated_at,
         participants=participants_out,
         other_user=other_user_out,
-        last_message=None,  # Phase 5 messaging will populate
-        unread_count=0,  # Phase 5 messaging will calculate
+        last_message=last_msg_out,
+        unread_count=unread_count,
     )
 
 
@@ -89,7 +110,7 @@ async def create_conversation(
         else:
             response.status_code = status.HTTP_200_OK
 
-        return build_conversation_response(conv, current_user.id)
+        return await build_conversation_response(conv, current_user.id, db)
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,7 +130,7 @@ async def list_conversations(
     """Retrieve all active conversations for the authenticated user."""
     service = ConversationService(db)
     convs = await service.get_user_conversations(current_user.id)
-    items = [build_conversation_response(c, current_user.id) for c in convs]
+    items = [await build_conversation_response(c, current_user.id, db) for c in convs]
     return ConversationListResponse(conversations=items)
 
 
@@ -129,4 +150,4 @@ async def get_conversation(
         conversation_id=conversation_id,
         current_user_id=current_user.id,
     )
-    return build_conversation_response(conv, current_user.id)
+    return await build_conversation_response(conv, current_user.id, db)

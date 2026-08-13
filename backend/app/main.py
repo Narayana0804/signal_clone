@@ -15,7 +15,9 @@ from app.routers import (
     contacts_router,
     conversations_router,
     health_router,
+    messages_router,
     users_router,
+    websocket_router,
 )
 
 # Configure logging
@@ -79,3 +81,5 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(contacts_router)
 app.include_router(conversations_router)
+app.include_router(messages_router)
+app.include_router(websocket_router)

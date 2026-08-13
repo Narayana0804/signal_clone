@@ -14,6 +14,14 @@ from app.schemas.conversation import (
     LastMessagePreview,
     ParticipantResponse,
 )
+from app.schemas.message import (
+    MessageListResponse,
+    MessageResponse,
+    MessageSenderResponse,
+    ReadReceiptResponse,
+    ReceiptResponse,
+    SendMessageRequest,
+)
 from app.schemas.user import UpdateProfileRequest, UserResponse
 
 __all__ = [
@@ -26,8 +34,14 @@ __all__ = [
     "CreateConversationRequest",
     "LastMessagePreview",
     "LoginRequest",
+    "MessageListResponse",
+    "MessageResponse",
+    "MessageSenderResponse",
     "ParticipantResponse",
+    "ReadReceiptResponse",
+    "ReceiptResponse",
     "RegisterRequest",
+    "SendMessageRequest",
     "UpdateProfileRequest",
     "UserResponse",
     "UserSearchResponse",
