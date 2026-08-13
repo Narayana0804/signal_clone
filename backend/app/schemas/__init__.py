@@ -7,6 +7,13 @@ from app.schemas.contact import (
     ContactResponse,
     UserSearchResponse,
 )
+from app.schemas.conversation import (
+    ConversationListResponse,
+    ConversationResponse,
+    CreateConversationRequest,
+    LastMessagePreview,
+    ParticipantResponse,
+)
 from app.schemas.user import UpdateProfileRequest, UserResponse
 
 __all__ = [
@@ -14,7 +21,12 @@ __all__ = [
     "AuthResponse",
     "ContactListResponse",
     "ContactResponse",
+    "ConversationListResponse",
+    "ConversationResponse",
+    "CreateConversationRequest",
+    "LastMessagePreview",
     "LoginRequest",
+    "ParticipantResponse",
     "RegisterRequest",
     "UpdateProfileRequest",
     "UserResponse",

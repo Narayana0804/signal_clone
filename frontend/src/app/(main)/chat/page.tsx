@@ -1,25 +1,40 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { LogOut, User, Shield, Phone, Calendar } from "lucide-react";
-import { formatTimestamp, getInitials } from "@/lib/utils";
+import { useConversations } from "@/hooks/useConversations";
+import { useContacts } from "@/hooks/useContacts";
+import { ConversationSidebar } from "@/features/conversations/ConversationSidebar";
+import { ChatPanePlaceholder } from "@/features/conversations/ChatPanePlaceholder";
 import { ContactList } from "@/features/contacts/ContactList";
+import { X, UserCheck, MessageSquarePlus, LogOut } from "lucide-react";
+import { getInitials } from "@/lib/utils";
 
 export default function ChatPage() {
   const router = useRouter();
-  const { currentUser, loading, logout } = useAuth();
+  const { currentUser, loading: authLoading, logout } = useAuth();
+  const {
+    conversations,
+    selectedConversation,
+    selectedConversationId,
+    selectConversation,
+    createDirectConversation,
+  } = useConversations();
+  const { contacts, searchResults, searchUsers } = useContacts();
+
+  const [showContactsModal, setShowContactsModal] = useState(false);
+  const [modalSearchQuery, setModalSearchQuery] = useState("");
 
   useEffect(() => {
-    if (!loading && !currentUser) {
+    if (!authLoading && !currentUser) {
       router.push("/login");
     }
-  }, [loading, currentUser, router]);
+  }, [authLoading, currentUser, router]);
 
-  if (loading) {
+  if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] text-sm">
+      <div className="h-screen w-screen flex items-center justify-center bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] text-sm">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 border-2 border-[var(--color-signal-blue)] border-t-transparent rounded-full animate-spin"></div>
           <span>Validating session...</span>
@@ -32,78 +47,97 @@ export default function ChatPage() {
     return null;
   }
 
+  const handleStartChatWithUser = async (targetUserId: string) => {
+    try {
+      await createDirectConversation(targetUserId);
+      setShowContactsModal(false);
+    } catch {
+      // Error handled in hook
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[var(--color-bg-secondary)] p-6 flex flex-col items-center justify-start">
-      <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-        {/* User Profile Card */}
-        <div className="bg-[var(--color-bg-primary)] rounded-[var(--radius-lg)] shadow-[var(--shadow-medium)] border border-[var(--color-border-primary)] overflow-hidden">
-          {/* Header Banner */}
-          <div className="bg-[var(--color-signal-blue)] text-white p-6 text-center relative">
-            <div className="w-16 h-16 bg-white text-[var(--color-signal-blue)] rounded-full flex items-center justify-center mx-auto mb-3 font-bold text-xl shadow-md border-2 border-white">
-              {getInitials(currentUser.display_name)}
-            </div>
-            <h1 className="text-xl font-bold">{currentUser.display_name}</h1>
-            <p className="text-xs text-blue-100 mt-1">{currentUser.phone_number}</p>
-          </div>
+    <div className="h-screen w-screen overflow-hidden flex bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
+      {/* Signal Desktop Sidebar */}
+      <ConversationSidebar
+        conversations={conversations}
+        selectedConversationId={selectedConversationId}
+        onSelectConversation={selectConversation}
+        onOpenContactsModal={() => setShowContactsModal(true)}
+        currentUser={currentUser}
+      />
 
-          {/* Details Card */}
-          <div className="p-6 space-y-4">
-            <div className="flex items-center justify-between text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border-light)] pb-3">
-              <span className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-[var(--color-signal-blue)]" />
-                Verification Status
-              </span>
-              <span className="font-semibold px-2 py-0.5 rounded bg-green-100 text-green-800 border border-green-200">
-                Verified
-              </span>
-            </div>
+      {/* Main Chat View */}
+      <ChatPanePlaceholder conversation={selectedConversation} />
 
-            <div className="flex items-center justify-between text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border-light)] pb-3">
-              <span className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-[var(--color-signal-blue)]" />
-                Phone Number
-              </span>
-              <span className="font-mono font-medium text-[var(--color-text-primary)]">
-                {currentUser.phone_number}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border-light)] pb-3">
-              <span className="flex items-center gap-2">
-                <User className="w-4 h-4 text-[var(--color-signal-blue)]" />
-                About Status
-              </span>
-              <span className="text-[var(--color-text-primary)] italic">
-                {currentUser.about || "Available"}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs text-[var(--color-text-secondary)] pb-2">
-              <span className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-[var(--color-signal-blue)]" />
-                Account Created
-              </span>
-              <span>{formatTimestamp(currentUser.created_at)}</span>
-            </div>
-
-            <div className="pt-4">
+      {/* Contacts / Start Chat Modal */}
+      {showContactsModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="relative w-full max-w-lg bg-[var(--color-bg-primary)] rounded-[var(--radius-lg)] shadow-[var(--shadow-modal)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] flex items-center justify-between">
+              <h2 className="font-bold text-sm text-[var(--color-text-primary)] flex items-center gap-2">
+                <MessageSquarePlus className="w-4 h-4 text-[var(--color-signal-blue)]" />
+                Start a New Direct Chat
+              </h2>
               <button
-                onClick={async () => {
-                  await logout();
-                  router.push("/login");
-                }}
-                className="w-full py-2.5 px-4 bg-red-50 hover:bg-red-100 text-[var(--color-error)] border border-red-200 text-sm font-medium rounded-[var(--radius-md)] transition-colors flex items-center justify-center gap-2"
+                onClick={() => setShowContactsModal(false)}
+                className="p-1 rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
               >
-                <LogOut className="w-4 h-4" />
-                Sign Out (Invalidate Session)
+                <X className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* Quick Chat Triggers for Existing Contacts */}
+            <div className="p-4 flex-1 overflow-y-auto space-y-4">
+              <div>
+                <h3 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider mb-2">
+                  Select from Contacts
+                </h3>
+                {contacts.length === 0 ? (
+                  <p className="text-xs text-[var(--color-text-tertiary)] italic">
+                    No contacts saved yet. Use the tab below to add contacts.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {contacts.map((contact) => (
+                      <button
+                        key={contact.id}
+                        onClick={() => handleStartChatWithUser(contact.user.id)}
+                        className="w-full text-left p-2.5 rounded-[var(--radius-md)] border border-[var(--color-border-light)] hover:border-[var(--color-signal-blue)] hover:bg-blue-50/50 flex items-center justify-between transition-all group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs">
+                            {getInitials(contact.user.display_name)}
+                          </div>
+                          <div>
+                            <span className="font-bold text-xs text-[var(--color-text-primary)] block">
+                              {contact.user.display_name}
+                            </span>
+                            <span className="text-[11px] font-mono text-[var(--color-text-secondary)]">
+                              {contact.user.phone_number}
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-xs font-medium text-[var(--color-signal-blue)] group-hover:underline">
+                          Chat →
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Contact Management Component */}
+              <div className="border-t border-[var(--color-border-light)] pt-4">
+                <h3 className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider mb-2">
+                  Manage Contacts & Search Users
+                </h3>
+                <ContactList />
+              </div>
             </div>
           </div>
         </div>
-
-        {/* Contacts & User Search Component */}
-        <ContactList />
-      </div>
+      )}
     </div>
   );
 }

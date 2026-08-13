@@ -13,6 +13,7 @@ from app.middleware import OriginProtectionMiddleware
 from app.routers import (
     auth_router,
     contacts_router,
+    conversations_router,
     health_router,
     users_router,
 )
@@ -77,3 +78,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(contacts_router)
+app.include_router(conversations_router)
