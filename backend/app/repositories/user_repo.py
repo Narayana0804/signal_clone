@@ -64,3 +64,16 @@ class UserRepository:
         user.last_seen_at = utc_now()
         await self.db.flush()
         return user
+
+    async def search_users(self, query: str, exclude_user_id: str, limit: int = 20) -> list[User]:
+        """Search users by display name or phone number, excluding current user."""
+        pattern = f"%{query}%"
+        stmt = (
+            select(User)
+            .where(User.id != exclude_user_id)
+            .where((User.display_name.ilike(pattern)) | (User.phone_number.ilike(pattern)))
+            .order_by(User.display_name.asc())
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())

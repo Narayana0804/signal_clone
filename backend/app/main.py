@@ -9,7 +9,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import auth_router, health_router
+from app.middleware import OriginProtectionMiddleware
+from app.routers import (
+    auth_router,
+    contacts_router,
+    health_router,
+    users_router,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -63,6 +69,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CSRF / Origin Protection Middleware
+app.add_middleware(OriginProtectionMiddleware)
+
 # Routers
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(contacts_router)

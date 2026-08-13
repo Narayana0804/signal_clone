@@ -50,6 +50,10 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture
 async def client():
-    """Async HTTP test client fixture."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    """Async HTTP test client fixture with default trusted Origin header."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Origin": "http://localhost:3000"},
+    ) as c:
         yield c
