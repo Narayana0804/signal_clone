@@ -1,5 +1,8 @@
 """Pytest fixtures for backend tests."""
 
+import contextlib
+from pathlib import Path
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -8,41 +11,42 @@ from app.database import get_db
 from app.main import app
 from app.models import Base
 
-# In-memory SQLite for test isolation
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-test_engine = create_async_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
-
-TestingSessionLocal = async_sessionmaker(
-    test_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+# Test database file path
+TEST_DB_FILE = Path("./test_signal_suite.db")
+TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_FILE}"
 
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def prepare_database():
     """Create a fresh schema for every test function."""
-    async with test_engine.begin() as conn:
+    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+    await engine.dispose()
     yield
-    async with test_engine.begin() as conn:
+    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+    if TEST_DB_FILE.exists():
+        with contextlib.suppress(Exception):
+            TEST_DB_FILE.unlink()
 
 
 async def override_get_db():
-    """Override database dependency to use test database session."""
-    async with TestingSessionLocal() as session:
+    """Override database dependency to create thread-safe session per request."""
+    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await engine.dispose()
 
 
 app.dependency_overrides[get_db] = override_get_db
