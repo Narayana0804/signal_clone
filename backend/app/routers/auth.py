@@ -1,6 +1,6 @@
 """Authentication API router handlers."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,11 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 COOKIE_NAME = "session_token"
 COOKIE_MAX_AGE = settings.session_expiry_days * 24 * 60 * 60  # seconds
+
+# In production (cross-site Vercel -> Railway), SameSite=None and Secure=True are required.
+# In local development (localhost:3000 -> localhost:8000), SameSite=Lax and Secure=False work.
+COOKIE_SAMESITE: Literal["none", "lax"] = "none" if settings.is_production else "lax"
+COOKIE_SECURE: bool = settings.is_production
 
 
 @router.post(
@@ -63,20 +68,19 @@ async def login(
     service = AuthService(db)
     user, raw_token = await service.login(req.phone_number, req.otp)
 
-    # Set HTTP-only cookie
+    # Set HTTP-only cookie (No raw token in response body)
     response.set_cookie(
         key=COOKIE_NAME,
         value=raw_token,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        samesite="lax",
-        secure=settings.is_production,
+        samesite=COOKIE_SAMESITE,
+        secure=COOKIE_SECURE,
         path="/",
     )
 
     return AuthResponse(
         user=UserResponse.model_validate(user),
-        token=raw_token,
     )
 
 
@@ -98,8 +102,8 @@ async def logout(
         key=COOKIE_NAME,
         path="/",
         httponly=True,
-        samesite="lax",
-        secure=settings.is_production,
+        samesite=COOKIE_SAMESITE,
+        secure=COOKIE_SECURE,
     )
 
     return {"message": "Logged out"}

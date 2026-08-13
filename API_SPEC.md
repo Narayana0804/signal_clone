@@ -131,17 +131,21 @@ Login and receive session cookie. User must be verified first.
     "display_name": "Alice",
     "avatar_url": null,
     "about": "",
+    "is_verified": 1,
     "created_at": "2024-01-15T10:30:00Z"
-  },
-  "token": "raw_session_token"
+  }
 }
 ```
 
-Sets `Set-Cookie: session_token=<token>; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`
+Sets `Set-Cookie: session_token=<token>; HttpOnly; Path=/; SameSite=Lax (dev) / None (prod); Secure (prod)`
 
-Also returns token in body for WebSocket usage.
+> [!NOTE]
+> Authentication is strictly governed by the HTTP-only session cookie. The raw session token is NOT returned in the response body to prevent credential leakage to JavaScript state.
 
-**Errors:** 404 User not found
+> [!NOTE]
+> Mock OTP: Fixed code `123456` is used for phone verification per assignment scope. No real SMS provider is connected.
+
+**Errors:** 400 Unverified user / Invalid OTP, 404 User not found
 
 ---
 

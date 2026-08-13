@@ -102,15 +102,30 @@ Returns `200` with `{"status": "healthy", "database": "connected"}` when operati
 
 Configure platform health checks to poll this endpoint.
 
-## CORS Configuration
+## CORS & Cross-Site Cookie Configuration
 
-Production CORS must be restricted to the frontend domain only:
+### Production Architecture
+- **Frontend**: Vercel (`https://<frontend-app>.vercel.app`)
+- **Backend**: Railway (`https://<backend-app>.up.railway.app`)
 
-```python
-origins = [
-    "https://your-frontend.vercel.app",
-]
-```
+Because the frontend and backend reside on different root domains (`vercel.app` vs `up.railway.app`), requests sent from the browser are classified as **cross-site**.
+
+### Required Production Cookie Settings
+To allow modern browsers (Chrome, Safari, Firefox) to accept and attach HTTP-only session cookies across different domains:
+
+1. **`ENVIRONMENT=production`** environment variable must be set on Railway.
+2. The session cookie is issued with:
+   - `SameSite=None` (allows cross-site cookie transmission)
+   - `Secure=True` (mandatory when `SameSite=None`; requires HTTPS)
+   - `HttpOnly=True` (protects cookie from JavaScript access)
+3. **CORS Configuration**:
+   - `CORS_ORIGINS=https://<frontend-app>.vercel.app` (must match frontend origin exactly, no wildcards)
+   - `allow_credentials=True` (required for browser to send/receive cookies)
+
+### Development Cookie Settings
+In local development (`http://localhost:3000` to `http://localhost:8000`):
+- `ENVIRONMENT=development`
+- `SameSite=Lax` and `Secure=False` are used because browsers block `SameSite=None` on unencrypted HTTP.
 
 ## Deployment Checklist
 

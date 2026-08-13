@@ -1,62 +1,58 @@
-"""Backend unit/integration tests for authentication endpoints."""
+"""Granular unit/integration tests for authentication endpoints."""
 
 import pytest
 from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_registration_and_auth_flow(client: AsyncClient):
-    """Comprehensive test suite for authentication requirements."""
-    phone = "+15550001111"
-    display_name = "Alice Tester"
-
-    # 1. Unauthenticated GET /auth/me -> 401 Unauthorized
-    res = await client.get("/api/v1/auth/me")
-    assert res.status_code == 401
-    assert res.json()["detail"] == "Authentication required"
-
-    # 2. Invalid registration (bad phone number format) -> 422
+async def test_successful_registration(client: AsyncClient):
+    """Verify registration creates an unverified user account."""
     res = await client.post(
         "/api/v1/auth/register",
-        json={"phone_number": "invalid", "display_name": "Alice"},
+        json={"phone_number": "+15551112222", "display_name": "Alice Tester"},
+    )
+    assert res.status_code == 201
+    data = res.json()
+    assert data["phone_number"] == "+15551112222"
+    assert data["display_name"] == "Alice Tester"
+    assert data["is_verified"] == 0
+    assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_invalid_registration_phone_format(client: AsyncClient):
+    """Verify registration rejects invalid phone number formats."""
+    res = await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": "invalid-phone", "display_name": "Alice"},
     )
     assert res.status_code == 422
 
-    # 3. Successful Registration -> 201 Created
-    res = await client.post(
-        "/api/v1/auth/register",
-        json={"phone_number": phone, "display_name": display_name},
-    )
-    assert res.status_code == 201
-    user_data = res.json()
-    assert user_data["phone_number"] == phone
-    assert user_data["display_name"] == display_name
-    assert user_data["is_verified"] == 0
-    user_id = user_data["id"]
 
-    # 4. Duplicate Registration -> 409 Conflict
+@pytest.mark.asyncio
+async def test_duplicate_registration_rejected(client: AsyncClient):
+    """Verify duplicate phone registration returns 409 Conflict."""
+    phone = "+15552223333"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "First User"},
+    )
     res = await client.post(
         "/api/v1/auth/register",
-        json={"phone_number": phone, "display_name": "Alice 2"},
+        json={"phone_number": phone, "display_name": "Second User"},
     )
     assert res.status_code == 409
+    assert "already registered" in res.json()["detail"]
 
-    # 5. Login before verification -> 400 Bad Request
-    res = await client.post(
-        "/api/v1/auth/login",
-        json={"phone_number": phone, "otp": "123456"},
+
+@pytest.mark.asyncio
+async def test_valid_otp_verification(client: AsyncClient):
+    """Verify valid OTP ('123456') marks user as verified."""
+    phone = "+15553334444"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Bob"},
     )
-    assert res.status_code == 400
-    assert "not verified" in res.json()["detail"]
-
-    # 6. Verify with invalid OTP -> 400 Bad Request
-    res = await client.post(
-        "/api/v1/auth/verify",
-        json={"phone_number": phone, "otp": "999999"},
-    )
-    assert res.status_code == 400
-
-    # 7. Successful OTP verification -> 200 OK
     res = await client.post(
         "/api/v1/auth/verify",
         json={"phone_number": phone, "otp": "123456"},
@@ -64,39 +60,177 @@ async def test_registration_and_auth_flow(client: AsyncClient):
     assert res.status_code == 200
     assert res.json()["verified"] is True
 
-    # 8. Successful Login -> 200 OK, sets HTTP-only cookie
+
+@pytest.mark.asyncio
+async def test_invalid_otp_verification_rejected(client: AsyncClient):
+    """Verify invalid OTP ('999999') is rejected."""
+    phone = "+15554445555"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Charlie"},
+    )
+    res = await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "999999"},
+    )
+    assert res.status_code == 400
+    assert "Invalid OTP" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_unverified_login_rejected(client: AsyncClient):
+    """Verify login is rejected for unverified users."""
+    phone = "+15555556666"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Dave"},
+    )
+    res = await client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+    assert res.status_code == 400
+    assert "not verified" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_login_invalid_otp_rejected(client: AsyncClient):
+    """Verify login with wrong OTP is rejected."""
+    phone = "+15556667777"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Eve"},
+    )
+    await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+    res = await client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": phone, "otp": "000000"},
+    )
+    assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_successful_login_sets_cookie_without_exposing_token(client: AsyncClient):
+    """Verify login issues HTTP-only cookie and does NOT return raw token in body."""
+    phone = "+15557778888"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Frank"},
+    )
+    await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+
     res = await client.post(
         "/api/v1/auth/login",
         json={"phone_number": phone, "otp": "123456"},
     )
     assert res.status_code == 200
-    auth_data = res.json()
-    assert auth_data["user"]["id"] == user_id
-    assert auth_data["user"]["is_verified"] == 1
-    assert "token" in auth_data
-    assert "session_token" in res.cookies
+    body = res.json()
+    assert "user" in body
+    assert "token" not in body  # Raw token must NOT be exposed in response body
+    assert body["user"]["phone_number"] == phone
+    assert "session_token" in res.cookies  # Cookie must be set
 
-    # 9. Authenticated GET /auth/me using cookie session -> 200 OK
+
+@pytest.mark.asyncio
+async def test_get_me_authenticated(client: AsyncClient):
+    """Verify GET /auth/me returns current user profile when session cookie is present."""
+    phone = "+15558889999"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Grace"},
+    )
+    await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+    await client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+
     res = await client.get("/api/v1/auth/me")
     assert res.status_code == 200
-    me_data = res.json()
-    assert me_data["id"] == user_id
-    assert me_data["display_name"] == display_name
+    me = res.json()
+    assert me["phone_number"] == phone
+    assert me["display_name"] == "Grace"
 
-    # 10. PATCH /auth/me profile update -> 200 OK
+
+@pytest.mark.asyncio
+async def test_get_me_unauthenticated(client: AsyncClient):
+    """Verify GET /auth/me returns 401 when no session cookie or token is provided."""
+    res = await client.get("/api/v1/auth/me")
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Authentication required"
+
+
+@pytest.mark.asyncio
+async def test_logout_invalidates_session_and_clears_cookie(client: AsyncClient):
+    """Verify logout invalidates server session and clears session cookie."""
+    phone = "+15559990000"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Heidi"},
+    )
+    await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+    await client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+
+    # Confirm authenticated before logout
+    res_before = await client.get("/api/v1/auth/me")
+    assert res_before.status_code == 200
+
+    # Logout
+    res_logout = await client.post("/api/v1/auth/logout")
+    assert res_logout.status_code == 200
+
+    # Request after logout must fail
+    res_after = await client.get("/api/v1/auth/me")
+    assert res_after.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_patch_me_profile_success(client: AsyncClient):
+    """Verify PATCH /auth/me updates display_name and about status."""
+    phone = "+15550009999"
+    await client.post(
+        "/api/v1/auth/register",
+        json={"phone_number": phone, "display_name": "Ivan"},
+    )
+    await client.post(
+        "/api/v1/auth/verify",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+    await client.post(
+        "/api/v1/auth/login",
+        json={"phone_number": phone, "otp": "123456"},
+    )
+
     res = await client.patch(
         "/api/v1/auth/me",
-        json={"about": "Hey there! I am using Signal.", "display_name": "Alice Smith"},
+        json={"display_name": "Ivan Updated", "about": "Available for chat"},
     )
     assert res.status_code == 200
     updated = res.json()
-    assert updated["display_name"] == "Alice Smith"
-    assert updated["about"] == "Hey there! I am using Signal."
+    assert updated["display_name"] == "Ivan Updated"
+    assert updated["about"] == "Available for chat"
 
-    # 11. Logout -> 200 OK, deletes session from server and clears cookie
-    res = await client.post("/api/v1/auth/logout")
-    assert res.status_code == 200
 
-    # 12. Authenticated request AFTER logout -> 401 Unauthorized (session invalidated)
-    res = await client.get("/api/v1/auth/me")
+@pytest.mark.asyncio
+async def test_patch_me_unauthenticated(client: AsyncClient):
+    """Verify PATCH /auth/me fails with 401 for unauthenticated requests."""
+    res = await client.patch(
+        "/api/v1/auth/me",
+        json={"display_name": "Hacker"},
+    )
     assert res.status_code == 401

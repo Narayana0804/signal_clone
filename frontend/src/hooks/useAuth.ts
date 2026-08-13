@@ -80,7 +80,7 @@ export function useAuth() {
   const login = async (phoneNumber: string, otp: string) => {
     setError(null);
     try {
-      const data = await apiRequest<{ user: User; token: string }>("/auth/login", {
+      const data = await apiRequest<AuthResponse>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
           phone_number: phoneNumber,
@@ -88,7 +88,7 @@ export function useAuth() {
         }),
       });
       setCurrentUser(data.user);
-      return data;
+      return data.user;
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

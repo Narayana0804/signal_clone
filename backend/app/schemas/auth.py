@@ -30,4 +30,3 @@ class AuthResponse(BaseModel):
     """Response schema for login success."""
 
     user: UserResponse
-    token: str
