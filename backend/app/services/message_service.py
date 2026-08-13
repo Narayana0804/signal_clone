@@ -1,4 +1,4 @@
-"""Message business logic service implementing strict persistence-before-broadcast flow."""
+"""Message business logic service implementing strict persistence-before-broadcast flow and delivery receipt transitions."""
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,7 +93,7 @@ class MessageService:
             reply_to_id=reply_to_id,
         )
 
-        # 4. Create receipts for all other active conversation participants
+        # 4. Create SENT receipts for all other active conversation participants
         recipient_user_ids = [
             p.user_id for p in conv.participants if p.user_id != sender.id and p.left_at is None
         ]
@@ -127,7 +127,7 @@ class MessageService:
         before: str | None = None,
         limit: int = 50,
     ) -> tuple[list[MessageResponse], bool]:
-        """Get paginated messages for a conversation with authorization check."""
+        """Get paginated messages using deterministic (created_at, id) cursor ordering."""
         conv = await self.conv_repo.get_conversation_by_id(conversation_id)
         if not conv:
             raise HTTPException(
@@ -151,6 +151,22 @@ class MessageService:
 
         items = [build_message_response(m) for m in msgs]
         return items, has_more
+
+    async def mark_delivered(
+        self,
+        message_id: str,
+        recipient_user_id: str,
+    ):
+        """Transition receipt status from SENT -> DELIVERED."""
+        sender_id = await self.msg_repo.mark_message_delivered(message_id, recipient_user_id)
+        await self.db.commit()
+
+        if sender_id and sender_id != recipient_user_id:
+            await ws_manager.broadcast_to_user(
+                user_id=sender_id,
+                event_type="message.delivered",
+                payload={"message_id": message_id, "recipient_id": recipient_user_id},
+            )
 
     async def mark_read(
         self,

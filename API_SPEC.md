@@ -10,7 +10,7 @@ Production:  https://<backend-domain>/api/v1
 ## Common Conventions
 
 - **Content-Type**: `application/json`
-- **Authentication**: HTTP-only cookie `session_token` for REST; query parameter `token` for WebSocket
+- **Authentication**: HTTP-only cookie `session_token` for REST and WebSocket connections
 - **IDs**: UUID v4 (string format)
 - **Timestamps**: ISO 8601 UTC (e.g., `2024-01-15T10:30:00Z`)
 - **Pagination**: Cursor-based using `before` (message ID) + `limit` (default 50)

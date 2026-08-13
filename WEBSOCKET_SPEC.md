@@ -3,23 +3,24 @@
 ## Connection
 
 ```
-ws://localhost:8000/ws?token=<session_token>
-wss://<backend-domain>/ws?token=<session_token>
+ws://localhost:8000/ws
+wss://<backend-domain>/ws
 ```
 
 ### Authentication
-- Token is passed as query parameter
-- Server validates token against `sessions` table
-- If invalid/expired: server closes connection with code 4001
-- If valid: server sends `connection.ready` event
+- Authentication is strictly performed using the existing HTTP-only `session_token` cookie during the WebSocket upgrade handshake.
+- Raw session tokens are NEVER passed in query parameters or exposed to client JavaScript.
+- Server validates cookie against `sessions` table (SHA-256 hash lookup).
+- If cookie is missing, invalid, or expired: server closes connection immediately with code `4001` ("Authentication failed").
+- If valid: server registers connection and sends `connection.ready` event.
 
 ### Connection Lifecycle
 
 ```
 Client                              Server
   │                                    │
-  ├── WS Connect ?token=xxx ──────────►│
-  │                                    ├── Validate token
+  ├── WS Handshake (Cookie) ──────────►│
+  │                                    ├── Validate session_token cookie
   │                                    ├── Register connection
   │◄── connection.ready ──────────────┤
   │                                    │
@@ -35,10 +36,10 @@ Client                              Server
 - All connections for a user receive all events for that user
 - Connection Manager maintains: `Map<user_id, Set<WebSocket>>`
 
-### Reconnection
-- Client implements automatic reconnection with exponential backoff
-- On reconnect: client re-fetches server state via REST API (conversations, messages)
-- Server does NOT queue events for offline users — persistence is via the database
+### Reconnection & Offline Delivery
+- Client implements automatic reconnection with exponential backoff.
+- On reconnect: client re-fetches server state via REST API (`GET /conversations/{id}/messages`).
+- Server does NOT queue events for offline users — durability is guaranteed via SQLite persistence before broadcast.
 - Recommended backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap)
 
 ---

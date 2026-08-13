@@ -1,13 +1,14 @@
-"""WebSocket router for real-time messaging, delivery receipts, and presence updates."""
+"""WebSocket router for real-time messaging using HTTP-only session cookie authentication."""
 
 import hashlib
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.repositories.message_repo import MessageRepository
 from app.repositories.session_repo import SessionRepository
 from app.websockets.manager import ws_manager
 
@@ -19,23 +20,22 @@ router = APIRouter(tags=["websockets"])
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Annotated[str | None, Query()] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,  # type: ignore[assignment]
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """WebSocket endpoint for real-time bi-directional events."""
-    # Extract token from query parameter or session cookie
-    raw_token = token or websocket.cookies.get("session_token")
-    if not raw_token:
-        logger.warning("WebSocket connection attempt missing token")
+    """WebSocket endpoint using HTTP-only session cookie authentication."""
+    # Extract session_token strictly from HTTP-only cookie
+    session_token = websocket.cookies.get("session_token")
+    if not session_token:
+        logger.warning("WebSocket connection rejected: missing session_token cookie")
         await websocket.close(code=4001, reason="Authentication failed")
         return
 
-    # Validate token against database
-    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    # Hash token and validate active session in database
+    token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
     session_repo = SessionRepository(db)
     session = await session_repo.get_active_session_by_hash(token_hash)
     if not session:
-        logger.warning("WebSocket connection attempt with invalid/expired token")
+        logger.warning("WebSocket connection rejected: invalid/expired session cookie")
         await websocket.close(code=4001, reason="Authentication failed")
         return
 
@@ -48,21 +48,27 @@ async def websocket_endpoint(
             event_type = data.get("type")
             payload = data.get("payload", {})
 
-            # Handle client-sent events if needed (e.g., message.delivered acknowledgment or typing)
+            # Handle client delivery acknowledgment
             if event_type == "message.delivered":
                 msg_id = payload.get("message_id")
-                conv_id = payload.get("conversation_id")
-                logger.debug(
-                    "Received message.delivered ack for msg_id=%s conv_id=%s from user_id=%s",
-                    msg_id,
-                    conv_id,
-                    user_id,
-                )
-            elif event_type in ("typing.started", "typing.stopped"):
-                conv_id = payload.get("conversation_id")
-                logger.debug(
-                    "Received %s event for conv_id=%s from user_id=%s", event_type, conv_id, user_id
-                )
+                if msg_id:
+                    msg_repo = MessageRepository(db)
+                    sender_id = await msg_repo.mark_message_delivered(
+                        message_id=msg_id,
+                        recipient_user_id=user_id,
+                    )
+                    await db.commit()
+
+                    if sender_id and sender_id != user_id:
+                        # Broadcast message.delivered event to the message sender
+                        await ws_manager.broadcast_to_user(
+                            user_id=sender_id,
+                            event_type="message.delivered",
+                            payload={
+                                "message_id": msg_id,
+                                "recipient_id": user_id,
+                            },
+                        )
 
     except WebSocketDisconnect:
         ws_manager.disconnect(user_id, websocket)

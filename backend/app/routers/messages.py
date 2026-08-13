@@ -57,7 +57,7 @@ async def get_messages(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="Max messages to return")] = 50,
 ) -> MessageListResponse:
-    """Retrieve messages for a conversation with cursor-based pagination."""
+    """Retrieve messages for a conversation using deterministic (created_at, id) cursor ordering."""
     service = MessageService(db)
     messages, has_more = await service.get_messages(
         conversation_id=conversation_id,
@@ -69,9 +69,28 @@ async def get_messages(
 
 
 @router.post(
+    "/messages/{message_id}/delivered",
+    status_code=status.HTTP_200_OK,
+    summary="Acknowledge message delivery (SENT -> DELIVERED)",
+)
+async def mark_message_delivered(
+    message_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Mark a message status as DELIVERED for the current user."""
+    service = MessageService(db)
+    await service.mark_delivered(
+        message_id=message_id,
+        recipient_user_id=current_user.id,
+    )
+    return {"status": "ok"}
+
+
+@router.post(
     "/messages/{message_id}/read",
     response_model=ReadReceiptResponse,
-    summary="Mark messages as read up to message_id",
+    summary="Mark messages as read up to message_id (DELIVERED/SENT -> READ)",
 )
 async def mark_message_read(
     message_id: str,

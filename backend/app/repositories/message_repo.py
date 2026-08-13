@@ -1,4 +1,4 @@
-"""Message repository for database operations."""
+"""Message repository for database operations with deterministic pagination and 3-state receipt handling."""
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,7 @@ from app.models.participant import ConversationParticipant
 
 
 class MessageRepository:
-    """Repository for managing Message and MessageReceipt entities."""
+    """Repository for managing Message and MessageReceipt entities with deterministic timestamp+ID ordering."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -73,7 +73,7 @@ class MessageRepository:
         before_message_id: str | None = None,
         limit: int = 50,
     ) -> tuple[list[Message], bool]:
-        """Get paginated messages for a conversation using before cursor, returned in chronological ASC order."""
+        """Get paginated messages using deterministic (created_at, id) cursor ordering."""
         stmt = (
             select(Message)
             .options(
@@ -87,24 +87,44 @@ class MessageRepository:
         if before_message_id:
             before_msg = await self.get_message_by_id(before_message_id)
             if before_msg:
-                stmt = stmt.where(Message.created_at < before_msg.created_at)
+                # Deterministic cursor comparison: (created_at < before) OR (created_at == before AND id < before_id)
+                stmt = stmt.where(
+                    (Message.created_at < before_msg.created_at)
+                    | ((Message.created_at == before_msg.created_at) & (Message.id < before_msg.id))
+                )
 
-        # Order DESC with limit + 1 to check has_more
-        stmt = stmt.order_by(Message.created_at.desc()).limit(limit + 1)
+        # Order by created_at DESC, id DESC with limit + 1
+        stmt = stmt.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit + 1)
         result = await self.db.execute(stmt)
         raw_msgs = result.unique().scalars().all()
 
         has_more = len(raw_msgs) > limit
-        msgs = raw_msgs[:limit]
+        msgs = list(raw_msgs[:limit])
 
-        # Reverse to chronological order ASC for chat view
+        # Reverse to chronological order (created_at ASC, id ASC) for display
         msgs.reverse()
         return msgs, has_more
+
+    async def mark_message_delivered(self, message_id: str, recipient_user_id: str) -> str | None:
+        """Transition receipt status from SENT -> DELIVERED for recipient_user_id. Returns sender_id."""
+        msg = await self.get_message_by_id(message_id)
+        if not msg:
+            return None
+
+        stmt = (
+            update(MessageReceipt)
+            .where(MessageReceipt.message_id == message_id)
+            .where(MessageReceipt.user_id == recipient_user_id)
+            .where(MessageReceipt.status == "SENT")
+            .values(status="DELIVERED", delivered_at=utc_now())
+        )
+        await self.db.execute(stmt)
+        return msg.sender_id
 
     async def mark_messages_read(
         self, conversation_id: str, user_id: str, target_message_id: str
     ) -> int:
-        """Mark all messages in conversation up to target_message_id as READ for user_id, updating last_read_message_id watermark."""
+        """Mark messages in conversation up to target_message_id as READ, updating participant read watermark."""
         target_msg = await self.get_message_by_id(target_message_id)
         if not target_msg or target_msg.conversation_id != conversation_id:
             return 0
@@ -120,11 +140,16 @@ class MessageRepository:
         )
         await self.db.execute(stmt_part)
 
-        # 2. Find receipts to update
+        # 2. Find messages chronologically <= target_msg using (created_at, id)
         subq = select(Message.id).where(
             (Message.conversation_id == conversation_id)
-            & (Message.created_at <= target_msg.created_at)
+            & (
+                (Message.created_at < target_msg.created_at)
+                | ((Message.created_at == target_msg.created_at) & (Message.id <= target_msg.id))
+            )
         )
+
+        # 3. Update receipts status to READ
         stmt_receipts = (
             update(MessageReceipt)
             .where(MessageReceipt.user_id == user_id)
@@ -145,20 +170,20 @@ class MessageRepository:
         await self.db.execute(stmt)
 
     async def get_last_message(self, conversation_id: str) -> Message | None:
-        """Get the latest non-deleted message for a conversation preview."""
+        """Get the latest non-deleted message for a conversation preview using deterministic ordering."""
         stmt = (
             select(Message)
             .options(joinedload(Message.sender))
             .where(Message.conversation_id == conversation_id)
             .where(Message.deleted_at.is_(None))
-            .order_by(Message.created_at.desc())
+            .order_by(Message.created_at.desc(), Message.id.desc())
             .limit(1)
         )
         result = await self.db.execute(stmt)
         return result.unique().scalar_one_or_none()
 
     async def get_unread_count(self, conversation_id: str, user_id: str) -> int:
-        """Compute unread message count for a user in a conversation based on read watermark."""
+        """Compute unread message count for user using chronological (created_at, id) watermark comparison."""
         # Find participant's last_read_message_id
         stmt_part = select(ConversationParticipant.last_read_message_id).where(
             (ConversationParticipant.conversation_id == conversation_id)
@@ -177,7 +202,13 @@ class MessageRepository:
         if last_read_id:
             last_read_msg = await self.get_message_by_id(last_read_id)
             if last_read_msg:
-                stmt_count = stmt_count.where(Message.created_at > last_read_msg.created_at)
+                stmt_count = stmt_count.where(
+                    (Message.created_at > last_read_msg.created_at)
+                    | (
+                        (Message.created_at == last_read_msg.created_at)
+                        & (Message.id > last_read_msg.id)
+                    )
+                )
 
         res_count = await self.db.execute(stmt_count)
         return res_count.scalar_one() or 0

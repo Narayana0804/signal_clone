@@ -37,17 +37,15 @@
 
 ---
 
-### D-005: HTTP-Only Cookie for REST + Query Param for WebSocket
-**Decision:** Authentication uses HTTP-only cookie for REST API calls. For WebSocket, the session token is passed as a query parameter.
-**Rationale:** HTTP-only cookies prevent XSS token theft for REST. WebSocket API doesn't support custom headers before upgrade, so query parameter is the practical option. This is a documented and accepted limitation.
-**Alternatives:**
-- Bearer token in Authorization header (REST) + cookie (WS) — more complex, cookies for WS still non-standard
-- Ticket-based WS auth (short-lived token from REST endpoint) — better security but added complexity
+### D-005: HTTP-Only Session Cookie for REST and WebSockets
+**Decision:** Both REST API and WebSocket connections authenticate strictly via the HTTP-only `session_token` cookie.
+**Rationale:** Eliminates credential leakage in query strings/URLs. Browser automatically includes HTTP-only cookies in WebSocket upgrade handshake. Frontend JavaScript never reads or stores raw session tokens.
+**Alternatives:** Query parameter for WS — rejected in Phase 5 hardening for security concerns.
 
 ---
 
 ### D-006: Session Token Design
-**Decision:** Generate 32-byte random token, store SHA-256 hash in database, return raw token to client.
+**Decision:** Generate 32-byte random token, store SHA-256 hash in database, return raw token to client via HTTP-only cookie.
 **Rationale:** Even if the database is compromised, raw tokens are not exposed. Standard practice for session management.
 **Alternatives:**
 - JWT — stateless but harder to revoke, overkill for single-server SQLite
@@ -62,10 +60,10 @@
 
 ---
 
-### D-008: Cursor-Based Pagination for Messages
-**Decision:** Use `before` (message ID) + `limit` for message pagination instead of offset-based.
-**Rationale:** Offset-based pagination is unreliable when new messages are being added in real time. Cursor-based gives consistent pages.
-**Alternatives:** Offset/limit — rejected for real-time message insertion issues.
+### D-008: Deterministic Cursor-Based Pagination for Messages
+**Decision:** Use `before` (message ID) + `limit` with deterministic `(created_at, id)` tie-breaking.
+**Rationale:** UUID string comparison does not guarantee chronological ordering. Combining `created_at` timestamp with `id` tie-breaker ensures 100% deterministic, zero-duplicate, zero-missing message pagination even when timestamps are identical.
+**Alternatives:** Offset/limit — rejected for real-time message insertion issues. Plain UUID string comparison — rejected in Phase 5 hardening.
 
 ---
 

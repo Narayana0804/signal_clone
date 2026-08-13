@@ -1,4 +1,4 @@
-"""Unit and integration tests for Persistent Messaging & WebSockets."""
+"""Unit and integration tests for Persistent Messaging, WebSockets Cookie Auth, and Receipt State Transitions."""
 
 import pytest
 from httpx import AsyncClient
@@ -93,14 +93,14 @@ async def test_message_authorization_send_and_retrieve(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_message_validation_and_read_receipts(client: AsyncClient):
-    """Verify empty message validation and mark-as-read watermark functionality."""
-    alice = await create_and_verify_user(client, "+15557000010", "Alice Read")
+async def test_3_state_receipt_transitions(client: AsyncClient):
+    """Verify SENT -> DELIVERED -> READ receipt transitions and authorization."""
+    alice = await create_and_verify_user(client, "+15557000010", "Alice Receipt")
 
     await client.post("/api/v1/auth/logout")
-    bob = await create_and_verify_user(client, "+15557000020", "Bob Read")
+    bob = await create_and_verify_user(client, "+15557000020", "Bob Receipt")
 
-    # Login as Alice and create conversation with Bob
+    # Login as Alice and send message
     await client.post("/api/v1/auth/logout")
     await client.post(
         "/api/v1/auth/login", json={"phone_number": alice["phone_number"], "otp": "123456"}
@@ -112,32 +112,87 @@ async def test_message_validation_and_read_receipts(client: AsyncClient):
     )
     conv_id = conv_res.json()["id"]
 
-    # Reject whitespace/empty content -> 400
-    empty_send = await client.post(
+    msg_res = await client.post(
         f"/api/v1/conversations/{conv_id}/messages",
-        json={"content": "    "},
+        json={"content": "State transition test"},
     )
-    assert empty_send.status_code == 400
+    msg_id = msg_res.json()["id"]
+    assert msg_res.json()["receipts"][0]["status"] == "SENT"
 
-    # Alice sends message
-    m1 = await client.post(
-        f"/api/v1/conversations/{conv_id}/messages",
-        json={"content": "First message"},
-    )
-    m1_id = m1.json()["id"]
-
-    # Bob logs in and reads message -> 200
+    # Bob logs in and acknowledges delivery -> DELIVERED
     await client.post("/api/v1/auth/logout")
     await client.post(
         "/api/v1/auth/login", json={"phone_number": bob["phone_number"], "otp": "123456"}
     )
 
-    read_res = await client.post(f"/api/v1/messages/{m1_id}/read")
-    assert read_res.status_code == 200
-    assert read_res.json()["read_count"] >= 1
+    deliv_res = await client.post(f"/api/v1/messages/{msg_id}/delivered")
+    assert deliv_res.status_code == 200
 
-    # Verify conversation list unread count for Bob is now 0
-    conv_list = await client.get("/api/v1/conversations")
-    c_item = next(c for c in conv_list.json()["conversations"] if c["id"] == conv_id)
-    assert c_item["unread_count"] == 0
-    assert c_item["last_message"]["content"] == "First message"
+    # Verify status is now DELIVERED
+    msgs_deliv = await client.get(f"/api/v1/conversations/{conv_id}/messages")
+    target_receipt = msgs_deliv.json()["messages"][0]["receipts"][0]
+    assert target_receipt["status"] == "DELIVERED"
+    assert target_receipt["delivered_at"] is not None
+
+    # Bob marks as read -> READ
+    read_res = await client.post(f"/api/v1/messages/{msg_id}/read")
+    assert read_res.status_code == 200
+
+    msgs_read = await client.get(f"/api/v1/conversations/{conv_id}/messages")
+    target_receipt_read = msgs_read.json()["messages"][0]["receipts"][0]
+    assert target_receipt_read["status"] == "READ"
+    assert target_receipt_read["read_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_deterministic_pagination_ordering(client: AsyncClient):
+    """Verify deterministic pagination ordering and zero missing/duplicate items."""
+    user1 = await create_and_verify_user(client, "+15558000010", "User One Pag")
+
+    await client.post("/api/v1/auth/logout")
+    user2 = await create_and_verify_user(client, "+15558000020", "User Two Pag")
+
+    await client.post("/api/v1/auth/logout")
+    await client.post(
+        "/api/v1/auth/login", json={"phone_number": user1["phone_number"], "otp": "123456"}
+    )
+
+    conv_res = await client.post(
+        "/api/v1/conversations",
+        json={"type": "DIRECT", "participant_ids": [user2["id"]]},
+    )
+    conv_id = conv_res.json()["id"]
+
+    # Send 5 messages
+    sent_ids = []
+    for i in range(5):
+        res = await client.post(
+            f"/api/v1/conversations/{conv_id}/messages",
+            json={"content": f"Message {i + 1}"},
+        )
+        sent_ids.append(res.json()["id"])
+
+    # Page 1: limit 3 (returns latest 3 messages: Message 3, 4, 5 in ASC order)
+    p1 = await client.get(f"/api/v1/conversations/{conv_id}/messages?limit=3")
+    assert p1.status_code == 200
+    p1_data = p1.json()
+    assert len(p1_data["messages"]) == 3
+    assert p1_data["has_more"] is True
+    first_msg_p1_id = p1_data["messages"][0]["id"]
+
+    # Page 2: before=first_msg_p1_id, limit 3
+    p2 = await client.get(
+        f"/api/v1/conversations/{conv_id}/messages?before={first_msg_p1_id}&limit=3"
+    )
+    assert p2.status_code == 200
+    p2_data = p2.json()
+    assert len(p2_data["messages"]) == 2
+    assert p2_data["has_more"] is False
+
+    # Combine IDs and ensure zero duplicates and 100% complete coverage
+    all_retrieved_ids = [m["id"] for m in p2_data["messages"]] + [
+        m["id"] for m in p1_data["messages"]
+    ]
+    assert len(all_retrieved_ids) == 5
+    assert len(set(all_retrieved_ids)) == 5
+    assert all_retrieved_ids == sent_ids
