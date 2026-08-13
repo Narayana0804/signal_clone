@@ -1,1 +1,5 @@
-"""Service layer package."""
+"""Services package barrel export."""
+
+from app.services.auth_service import AuthService
+
+__all__ = ["AuthService"]

@@ -1,13 +1,5 @@
 import { create } from "zustand";
-
-interface User {
-  id: string;
-  phone_number: string;
-  display_name: string;
-  avatar_url?: string | null;
-  about?: string;
-  is_verified?: number;
-}
+import { User } from "@/types";
 
 interface AppState {
   currentUser: User | null;
