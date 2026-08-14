@@ -33,7 +33,15 @@ export async function apiRequest<T>(
     credentials: "include", // Send HTTP-only session cookies
   };
 
-  const response = await fetch(url, config);
+  let response: Response;
+  try {
+    response = await fetch(url, config);
+  } catch {
+    throw new ApiError(
+      0,
+      "Network error — Unable to connect to Signal server. Please verify your connection."
+    );
+  }
 
   if (response.status === 204) {
     return {} as T;

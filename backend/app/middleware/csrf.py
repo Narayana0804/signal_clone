@@ -58,7 +58,11 @@ class OriginProtectionMiddleware(BaseHTTPMiddleware):
                 )
 
             trusted_origins = settings.cors_origin_list
-            if request_origin not in trusted_origins:
+            is_trusted = (
+                request_origin in trusted_origins
+                or (request_origin and request_origin.startswith("https://") and request_origin.endswith(".vercel.app"))
+            )
+            if not is_trusted:
                 return Response(
                     content='{"detail":"Untrusted request origin"}',
                     status_code=status.HTTP_403_FORBIDDEN,

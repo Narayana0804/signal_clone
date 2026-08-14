@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 engine = create_async_engine(
     settings.database_url,
     echo=settings.environment == "development",
-    connect_args={"check_same_thread": False},
+    connect_args={"check_same_thread": False, "timeout": 30.0},
 )
 
 async_session_factory = async_sessionmaker(
