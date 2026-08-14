@@ -24,11 +24,14 @@ async_session_factory = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Initialize the database — enable WAL mode for SQLite concurrency."""
+    """Initialize the database — enable WAL mode and ensure table schema exists."""
+    from app.models.base import Base
+
     async with engine.begin() as conn:
         await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
-    logger.info("Database initialized with WAL mode and foreign keys enabled")
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database initialized with WAL mode, foreign keys, and metadata schema")
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
