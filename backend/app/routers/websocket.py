@@ -134,6 +134,24 @@ async def websocket_endpoint(websocket: WebSocket):
     if not was_online:
         await notify_presence_change(user_id, "online")
 
+    # Send presence state for all active co-participants who are currently online
+    async with get_db_session() as db:
+        if db:
+            conv_repo = ConversationRepository(db)
+            user_convs = await conv_repo.get_user_conversations(user_id)
+            for conv in user_convs:
+                for p in conv.participants:
+                    if p.user_id != user_id and ws_manager.is_user_online(p.user_id):
+                        await ws_manager.send_personal_event(
+                            websocket,
+                            "presence.updated",
+                            {
+                                "user_id": p.user_id,
+                                "status": "online",
+                                "last_seen_at": None,
+                            },
+                        )
+
     try:
         while True:
             data = await websocket.receive_json()
