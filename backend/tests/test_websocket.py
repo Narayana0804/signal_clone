@@ -7,130 +7,119 @@ from starlette.websockets import WebSocketDisconnect
 from app.main import app
 
 
-def test_websocket_origin_and_cookie_auth():
-    """Verify WebSocket handshake requirements: trusted Origin + valid session cookie."""
-    client = TestClient(app)
-
-    # 1. Register & verify user to obtain session cookie
-    phone = "+15559000010"
-    client.post("/api/v1/auth/register", json={"phone_number": phone, "display_name": "WS User"})
+def _login_user(client: TestClient, phone: str, name: str) -> tuple[str, str]:
+    """Register, verify, login a user. Returns (user_id, session_cookie)."""
+    client.post("/api/v1/auth/register", json={"phone_number": phone, "display_name": name})
     client.post("/api/v1/auth/verify", json={"phone_number": phone, "otp": "123456"})
     login_res = client.post("/api/v1/auth/login", json={"phone_number": phone, "otp": "123456"})
-    session_cookie = login_res.cookies.get("session_token")
     user_id = login_res.json()["user"]["id"]
+    session_cookie = login_res.cookies.get("session_token")
+    return user_id, session_cookie
+
+
+def _ws_headers(origin: str, session_cookie: str | None = None) -> dict:
+    """Build headers dict for websocket_connect with Origin and optional Cookie."""
+    headers: dict[str, str] = {"Origin": origin}
+    if session_cookie is not None:
+        headers["Cookie"] = f"session_token={session_cookie}"
+    return headers
+
+
+def test_websocket_origin_and_cookie_auth(prepare_database):
+    """Verify WebSocket handshake requirements: trusted Origin + valid session cookie."""
+    client = TestClient(app)
+    user_id, session_cookie = _login_user(client, "+15559000010", "WS User")
+    assert session_cookie is not None
 
     # 1. Valid session cookie + trusted Origin -> Connection ACCEPTED
     with client.websocket_connect(
         "/ws",
-        headers={"Origin": "http://localhost:3000"},
+        headers=_ws_headers("http://localhost:3000", session_cookie),
     ) as websocket:
         data = websocket.receive_json()
         assert data["type"] == "connection.ready"
         assert data["payload"]["user_id"] == user_id
 
     # 2. Missing session cookie -> WebSocketDisconnect code 4001
-    c2 = TestClient(app)
     with (
         pytest.raises(WebSocketDisconnect) as exc2,
-        c2.websocket_connect(
+        TestClient(app).websocket_connect(
             "/ws",
-            headers={"Origin": "http://localhost:3000"},
+            headers=_ws_headers("http://localhost:3000"),
         ) as ws2,
     ):
         ws2.receive_json()
     assert exc2.value.code == 4001
 
     # 3. Invalid session cookie -> WebSocketDisconnect code 4001
-    c3 = TestClient(app)
-    c3.cookies.set("session_token", "invalid-token-xyz")
     with (
         pytest.raises(WebSocketDisconnect) as exc3,
-        c3.websocket_connect(
+        TestClient(app).websocket_connect(
             "/ws",
-            headers={"Origin": "http://localhost:3000"},
+            headers=_ws_headers("http://localhost:3000", "invalid-token-xyz"),
         ) as ws3,
     ):
         ws3.receive_json()
     assert exc3.value.code == 4001
 
     # 4. Untrusted Origin -> WebSocketDisconnect code 4001
-    c4 = TestClient(app)
-    c4.cookies.set("session_token", session_cookie)
     with (
         pytest.raises(WebSocketDisconnect) as exc4,
-        c4.websocket_connect(
+        TestClient(app).websocket_connect(
             "/ws",
-            headers={"Origin": "http://malicious-attacker-site.com"},
+            headers=_ws_headers("http://malicious-attacker-site.com", session_cookie),
         ) as ws4,
     ):
         ws4.receive_json()
     assert exc4.value.code == 4001
 
     # 5. Missing Origin -> WebSocketDisconnect code 4001
-    c5 = TestClient(app)
-    c5.cookies.set("session_token", session_cookie)
     with (
         pytest.raises(WebSocketDisconnect) as exc5,
-        c5.websocket_connect(
+        TestClient(app).websocket_connect(
             "/ws",
+            headers={"Cookie": f"session_token={session_cookie}"},
         ) as ws5,
     ):
         ws5.receive_json()
     assert exc5.value.code == 4001
 
 
-def test_websocket_unauthorized_conversation_action():
+def test_websocket_unauthorized_conversation_action(prepare_database):
     """Verify an authenticated WebSocket user cannot perform actions on conversations they do not participate in."""
-    # Register Alice
+    ORIGIN = {"Origin": "http://localhost:3000"}
+
     c_alice = TestClient(app)
-    c_alice.post(
-        "/api/v1/auth/register", json={"phone_number": "+15559000020", "display_name": "Alice WS"}
-    )
-    c_alice.post("/api/v1/auth/verify", json={"phone_number": "+15559000020", "otp": "123456"})
-    c_alice.post("/api/v1/auth/login", json={"phone_number": "+15559000020", "otp": "123456"})
+    _, cookie_alice = _login_user(c_alice, "+15559000020", "Alice WS")
 
-    # Register Bob
     c_bob = TestClient(app)
-    c_bob.post(
-        "/api/v1/auth/register", json={"phone_number": "+15559000030", "display_name": "Bob WS"}
-    )
-    c_bob.post("/api/v1/auth/verify", json={"phone_number": "+15559000030", "otp": "123456"})
-    login_bob = c_bob.post(
-        "/api/v1/auth/login", json={"phone_number": "+15559000030", "otp": "123456"}
-    )
-    bob_id = login_bob.json()["user"]["id"]
+    bob_id, _ = _login_user(c_bob, "+15559000030", "Bob WS")
 
-    # Register Charlie (outsider)
     c_charlie = TestClient(app)
-    c_charlie.post(
-        "/api/v1/auth/register", json={"phone_number": "+15559000040", "display_name": "Charlie WS"}
-    )
-    c_charlie.post("/api/v1/auth/verify", json={"phone_number": "+15559000040", "otp": "123456"})
-    c_charlie.post("/api/v1/auth/login", json={"phone_number": "+15559000040", "otp": "123456"})
+    _, cookie_charlie = _login_user(c_charlie, "+15559000040", "Charlie WS")
 
     # Create Alice & Bob conversation + send message
     conv_res = c_alice.post(
         "/api/v1/conversations",
         json={"type": "DIRECT", "participant_ids": [bob_id]},
-        headers={"Origin": "http://localhost:3000"},
+        headers=ORIGIN,
     )
     conv_id = conv_res.json()["id"]
 
     msg_res = c_alice.post(
         f"/api/v1/conversations/{conv_id}/messages",
         json={"content": "Alice secret message"},
-        headers={"Origin": "http://localhost:3000"},
+        headers=ORIGIN,
     )
     msg_id = msg_res.json()["id"]
 
-    # Charlie (outsider) connects via WebSocket and attempts to acknowledge delivery of Alice's message
+    # Charlie (outsider) connects via WebSocket and attempts unauthorized action
     with c_charlie.websocket_connect(
         "/ws",
-        headers={"Origin": "http://localhost:3000"},
+        headers=_ws_headers("http://localhost:3000", cookie_charlie),
     ) as charlie_ws:
         charlie_ws.receive_json()  # connection.ready
 
-        # Send unauthorized message.delivered ack
         charlie_ws.send_json(
             {
                 "type": "message.delivered",

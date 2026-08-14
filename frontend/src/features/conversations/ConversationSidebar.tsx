@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { Search, SquarePen, Users, MessageSquare } from "lucide-react";
+import { Search, SquarePen, Users, MessageSquare, Circle } from "lucide-react";
 import { Conversation } from "@/hooks/useConversations";
+import { useAppStore } from "@/stores/appStore";
 import { formatTimestamp, getInitials } from "@/lib/utils";
 import { User } from "@/types";
 
@@ -22,6 +23,7 @@ export function ConversationSidebar({
   currentUser,
 }: ConversationSidebarProps) {
   const [filterQuery, setFilterQuery] = useState("");
+  const presence = useAppStore((state) => state.presence);
 
   const filteredConversations = conversations.filter((conv) => {
     if (!filterQuery.trim()) return true;
@@ -104,6 +106,9 @@ export function ConversationSidebar({
                 ? conv.other_user.display_name
                 : conv.name || "Conversation";
 
+            const otherUserId = conv.type === "DIRECT" ? conv.other_user?.id : undefined;
+            const isOnline = otherUserId ? presence[otherUserId]?.status === "online" : false;
+
             return (
               <button
                 key={conv.id}
@@ -114,9 +119,18 @@ export function ConversationSidebar({
                     : "hover:bg-[var(--color-bg-hover)]"
                 }`}
               >
-                {/* Avatar */}
-                <div className="w-10 h-10 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
-                  {getInitials(displayName)}
+                {/* Avatar with presence dot */}
+                <div className="relative flex-shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                    {getInitials(displayName)}
+                  </div>
+                  {otherUserId && (
+                    <Circle
+                      className={`w-3 h-3 absolute -bottom-0.5 -right-0.5 rounded-full border-2 border-[var(--color-bg-sidebar)] transition-colors duration-300 ${
+                        isOnline ? "fill-emerald-500 text-emerald-500" : "fill-gray-300 text-gray-300"
+                      }`}
+                    />
+                  )}
                 </div>
 
                 {/* Info */}

@@ -35,7 +35,7 @@ export async function apiRequest<T>(
 
   const response = await fetch(url, config);
 
-  if (response.status === 24) {
+  if (response.status === 204) {
     return {} as T;
   }
 

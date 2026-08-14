@@ -15,20 +15,21 @@ from app.models import Base
 TEST_DB_FILE = Path("./test_signal_suite.db")
 TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_FILE}"
 
+test_engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def prepare_database():
     """Create a fresh schema for every test function."""
-    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
+    async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
     yield
-    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-    async with engine.begin() as conn:
+    await test_engine.dispose()
+    async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    await test_engine.dispose()
     if TEST_DB_FILE.exists():
         with contextlib.suppress(Exception):
             TEST_DB_FILE.unlink()
@@ -36,17 +37,13 @@ async def prepare_database():
 
 async def override_get_db():
     """Override database dependency to create thread-safe session per request."""
-    engine = create_async_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with session_factory() as session:
+    async with test_session_factory() as session:
         try:
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await engine.dispose()
 
 
 app.dependency_overrides[get_db] = override_get_db

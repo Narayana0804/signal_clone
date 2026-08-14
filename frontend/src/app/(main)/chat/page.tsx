@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useConversations } from "@/hooks/useConversations";
 import { useContacts } from "@/hooks/useContacts";
 import { useWebSocket, WSEventEnvelope } from "@/hooks/useWebSocket";
+import { useAppStore } from "@/stores/appStore";
 import { ConversationSidebar } from "@/features/conversations/ConversationSidebar";
 import { ChatPane } from "@/features/conversations/ChatPane";
 import { ContactList } from "@/features/contacts/ContactList";
@@ -15,6 +16,7 @@ import { getInitials } from "@/lib/utils";
 export default function ChatPage() {
   const router = useRouter();
   const { currentUser, loading: authLoading } = useAuth();
+  const updatePresence = useAppStore((state) => state.updatePresence);
   const {
     conversations,
     selectedConversation,
@@ -27,15 +29,23 @@ export default function ChatPage() {
 
   const [showContactsModal, setShowContactsModal] = useState(false);
 
-  // WebSocket event handler
+  // Page-level WebSocket event handler (presence + conversation list updates)
   const handleWSEvent = useCallback(
     (event: WSEventEnvelope) => {
-      if (event.type === "message.created" || event.type === "message.read") {
-        // Refresh conversation list preview & message lists
+      if (
+        event.type === "message.created" ||
+        event.type === "message.read" ||
+        event.type === "conversation.created"
+      ) {
         fetchConversations();
       }
+
+      if (event.type === "presence.updated") {
+        const { user_id, status, last_seen_at } = event.payload;
+        updatePresence(user_id, status, last_seen_at ?? null);
+      }
     },
-    [fetchConversations]
+    [fetchConversations, updatePresence]
   );
 
   useWebSocket(handleWSEvent);

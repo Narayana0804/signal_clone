@@ -24,6 +24,12 @@ class ContactRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_users_who_added_contact(self, contact_user_id: str) -> list[str]:
+        """Get user IDs of all users who have saved contact_user_id as a contact."""
+        stmt = select(Contact.user_id).where(Contact.contact_user_id == contact_user_id)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_contact_by_pair(self, user_id: str, contact_user_id: str) -> Contact | None:
         """Find contact relationship between user and contact_user."""
         stmt = select(Contact).where(

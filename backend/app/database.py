@@ -1,6 +1,8 @@
 """SQLAlchemy async engine and session factory for SQLite."""
 
+import contextlib
 import logging
+from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -29,7 +31,7 @@ async def init_db() -> None:
     logger.info("Database initialized with WAL mode and foreign keys enabled")
 
 
-async def get_db() -> AsyncSession:  # type: ignore[misc]
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency: yield an async database session."""
     async with async_session_factory() as session:
         try:
@@ -37,4 +39,8 @@ async def get_db() -> AsyncSession:  # type: ignore[misc]
             await session.commit()
         except Exception:
             await session.rollback()
+            raise
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await session.rollback()
             raise

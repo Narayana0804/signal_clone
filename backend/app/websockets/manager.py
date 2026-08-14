@@ -18,6 +18,10 @@ class ConnectionManager:
         # Map user_id -> set of active WebSocket instances
         self.active_connections: dict[str, set[WebSocket]] = {}
 
+    def is_user_online(self, user_id: str) -> bool:
+        """Check if user has at least one active WebSocket connection."""
+        return user_id in self.active_connections and bool(self.active_connections[user_id])
+
     async def connect(self, user_id: str, websocket: WebSocket):
         """Accept WebSocket connection and register under user_id."""
         await websocket.accept()
@@ -71,7 +75,7 @@ class ConnectionManager:
 
         envelope = self.make_event_envelope(event_type, payload)
         dead_sockets = set()
-        for ws in self.active_connections[user_id]:
+        for ws in list(self.active_connections[user_id]):
             try:
                 await ws.send_json(envelope)
             except Exception as err:

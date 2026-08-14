@@ -45,7 +45,19 @@ export function useMessages(conversationId: string | null) {
       setError(null);
       const url = `/conversations/${convId}/messages${before ? `?before=${before}` : ""}`;
       const data = await apiRequest<{ messages: MessageItem[]; has_more: boolean }>(url);
-      setMessages(data.messages || []);
+      
+      setMessages((prev) => {
+        if (!before) {
+          return data.messages || [];
+        }
+        // Merge and deduplicate
+        const map = new Map<string, MessageItem>();
+        (data.messages || []).forEach((m) => map.set(m.id, m));
+        prev.forEach((m) => map.set(m.id, m));
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      });
       setHasMore(data.has_more || false);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -136,6 +148,15 @@ export function useMessages(conversationId: string | null) {
     });
   }, []);
 
+  const markAsDelivered = async (messageId: string) => {
+    if (!messageId) return;
+    try {
+      await apiRequest(`/messages/${messageId}/delivered`, { method: "POST" });
+    } catch {
+      // Ignore delivery ack error
+    }
+  };
+
   const markAsRead = async (messageId: string) => {
     if (!messageId) return;
     try {
@@ -145,6 +166,52 @@ export function useMessages(conversationId: string | null) {
     }
   };
 
+  const handleMessageDelivered = useCallback((msgId: string, recipientId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== msgId) return m;
+        const updatedReceipts = m.receipts.map((r) =>
+          r.user_id === recipientId ? { ...r, status: "DELIVERED" as const, delivered_at: new Date().toISOString() } : r
+        );
+        if (!updatedReceipts.some((r) => r.user_id === recipientId)) {
+          updatedReceipts.push({
+            user_id: recipientId,
+            status: "DELIVERED",
+            delivered_at: new Date().toISOString(),
+          });
+        }
+        return { ...m, receipts: updatedReceipts };
+      })
+    );
+  }, []);
+
+  const handleMessageRead = useCallback((convId: string, readerUserId: string, lastReadMessageId: string) => {
+    setMessages((prev) => {
+      const targetMsgIndex = prev.findIndex((m) => m.id === lastReadMessageId);
+      if (targetMsgIndex === -1) return prev;
+
+      const targetTimestamp = new Date(prev[targetMsgIndex].created_at).getTime();
+
+      return prev.map((m) => {
+        const msgTimestamp = new Date(m.created_at).getTime();
+        if (msgTimestamp <= targetTimestamp) {
+          const updatedReceipts = m.receipts.map((r) =>
+            r.user_id === readerUserId ? { ...r, status: "READ" as const, read_at: new Date().toISOString() } : r
+          );
+          if (!updatedReceipts.some((r) => r.user_id === readerUserId)) {
+            updatedReceipts.push({
+              user_id: readerUserId,
+              status: "READ",
+              read_at: new Date().toISOString(),
+            });
+          }
+          return { ...m, receipts: updatedReceipts };
+        }
+        return m;
+      });
+    });
+  }, []);
+
   return {
     messages,
     loading,
@@ -153,7 +220,10 @@ export function useMessages(conversationId: string | null) {
     hasMore,
     sendMessage,
     addIncomingMessage,
+    markAsDelivered,
     markAsRead,
+    handleMessageDelivered,
+    handleMessageRead,
     fetchMessages,
   };
 }
