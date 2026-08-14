@@ -16,15 +16,24 @@ ORIGIN_HEADER = {"Origin": "http://localhost:3000"}
 def test_typing_indicator_and_authorization_unit(prepare_database):
     """Verify typing indicator events are processed correctly over an authenticated WebSocket."""
     c_alice = TestClient(app)
-    c_alice.post("/api/v1/auth/register", json={"phone_number": "+15559990010", "display_name": "Alice Typing"})
+    c_alice.post(
+        "/api/v1/auth/register",
+        json={"phone_number": "+15559990010", "display_name": "Alice Typing"},
+    )
     c_alice.post("/api/v1/auth/verify", json={"phone_number": "+15559990010", "otp": "123456"})
-    r_alice = c_alice.post("/api/v1/auth/login", json={"phone_number": "+15559990010", "otp": "123456"})
+    r_alice = c_alice.post(
+        "/api/v1/auth/login", json={"phone_number": "+15559990010", "otp": "123456"}
+    )
     cookie_alice = r_alice.cookies.get("session_token")
 
     c_bob = TestClient(app)
-    c_bob.post("/api/v1/auth/register", json={"phone_number": "+15559990020", "display_name": "Bob Typing"})
+    c_bob.post(
+        "/api/v1/auth/register", json={"phone_number": "+15559990020", "display_name": "Bob Typing"}
+    )
     c_bob.post("/api/v1/auth/verify", json={"phone_number": "+15559990020", "otp": "123456"})
-    login_bob = c_bob.post("/api/v1/auth/login", json={"phone_number": "+15559990020", "otp": "123456"})
+    login_bob = c_bob.post(
+        "/api/v1/auth/login", json={"phone_number": "+15559990020", "otp": "123456"}
+    )
     bob_id = login_bob.json()["user"]["id"]
 
     # Alice creates conversation with Bob
@@ -53,16 +62,26 @@ async def test_presence_online_offline_broadcast(prepare_database):
 
     # Setup user1
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c1:
-        await c1.post("/api/v1/auth/register", json={"phone_number": "+15559990040", "display_name": "User One Pres"})
+        await c1.post(
+            "/api/v1/auth/register",
+            json={"phone_number": "+15559990040", "display_name": "User One Pres"},
+        )
         await c1.post("/api/v1/auth/verify", json={"phone_number": "+15559990040", "otp": "123456"})
-        u1_login = await c1.post("/api/v1/auth/login", json={"phone_number": "+15559990040", "otp": "123456"})
+        u1_login = await c1.post(
+            "/api/v1/auth/login", json={"phone_number": "+15559990040", "otp": "123456"}
+        )
         u1_id = u1_login.json()["user"]["id"]
 
     # Setup user2 and add user1 as contact
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c2:
-        await c2.post("/api/v1/auth/register", json={"phone_number": "+15559990050", "display_name": "User Two Pres"})
+        await c2.post(
+            "/api/v1/auth/register",
+            json={"phone_number": "+15559990050", "display_name": "User Two Pres"},
+        )
         await c2.post("/api/v1/auth/verify", json={"phone_number": "+15559990050", "otp": "123456"})
-        u2_login = await c2.post("/api/v1/auth/login", json={"phone_number": "+15559990050", "otp": "123456"})
+        u2_login = await c2.post(
+            "/api/v1/auth/login", json={"phone_number": "+15559990050", "otp": "123456"}
+        )
         u2_id = u2_login.json()["user"]["id"]
         # c2 auto-stores session cookie from login response
         await c2.post("/api/v1/contacts", json={"contact_user_id": u1_id}, headers=origin)
@@ -99,14 +118,20 @@ async def test_presence_online_offline_broadcast(prepare_database):
 def test_e2e_2_user_messaging_receipt_lifecycle(prepare_database):
     """End-to-End integration scenario for 2 users: Send -> SENT -> DELIVERED -> READ."""
     c_alice = TestClient(app)
-    c_alice.post("/api/v1/auth/register", json={"phone_number": "+15559990060", "display_name": "Alice E2E"})
+    c_alice.post(
+        "/api/v1/auth/register", json={"phone_number": "+15559990060", "display_name": "Alice E2E"}
+    )
     c_alice.post("/api/v1/auth/verify", json={"phone_number": "+15559990060", "otp": "123456"})
     c_alice.post("/api/v1/auth/login", json={"phone_number": "+15559990060", "otp": "123456"})
 
     c_bob = TestClient(app)
-    c_bob.post("/api/v1/auth/register", json={"phone_number": "+15559990070", "display_name": "Bob E2E"})
+    c_bob.post(
+        "/api/v1/auth/register", json={"phone_number": "+15559990070", "display_name": "Bob E2E"}
+    )
     c_bob.post("/api/v1/auth/verify", json={"phone_number": "+15559990070", "otp": "123456"})
-    login_bob = c_bob.post("/api/v1/auth/login", json={"phone_number": "+15559990070", "otp": "123456"})
+    login_bob = c_bob.post(
+        "/api/v1/auth/login", json={"phone_number": "+15559990070", "otp": "123456"}
+    )
     bob_id = login_bob.json()["user"]["id"]
 
     # 1. Alice creates conversation with Bob
@@ -152,14 +177,22 @@ def test_e2e_2_user_messaging_receipt_lifecycle(prepare_database):
 def test_offline_message_recovery_no_duplicates(prepare_database):
     """Verify offline user retrieves messages upon reconnecting without duplicates or data loss."""
     c_alice = TestClient(app)
-    c_alice.post("/api/v1/auth/register", json={"phone_number": "+15559990080", "display_name": "Alice Offline Test"})
+    c_alice.post(
+        "/api/v1/auth/register",
+        json={"phone_number": "+15559990080", "display_name": "Alice Offline Test"},
+    )
     c_alice.post("/api/v1/auth/verify", json={"phone_number": "+15559990080", "otp": "123456"})
     c_alice.post("/api/v1/auth/login", json={"phone_number": "+15559990080", "otp": "123456"})
 
     c_bob = TestClient(app)
-    c_bob.post("/api/v1/auth/register", json={"phone_number": "+15559990090", "display_name": "Bob Offline Test"})
+    c_bob.post(
+        "/api/v1/auth/register",
+        json={"phone_number": "+15559990090", "display_name": "Bob Offline Test"},
+    )
     c_bob.post("/api/v1/auth/verify", json={"phone_number": "+15559990090", "otp": "123456"})
-    login_bob = c_bob.post("/api/v1/auth/login", json={"phone_number": "+15559990090", "otp": "123456"})
+    login_bob = c_bob.post(
+        "/api/v1/auth/login", json={"phone_number": "+15559990090", "otp": "123456"}
+    )
     bob_id = login_bob.json()["user"]["id"]
 
     # Alice creates conversation with Bob
@@ -175,7 +208,7 @@ def test_offline_message_recovery_no_duplicates(prepare_database):
     for i in range(3):
         res = c_alice.post(
             f"/api/v1/conversations/{conv_id}/messages",
-            json={"content": f"Offline msg {i+1}"},
+            json={"content": f"Offline msg {i + 1}"},
             headers=ORIGIN_HEADER,
         )
         msg_ids.append(res.json()["id"])

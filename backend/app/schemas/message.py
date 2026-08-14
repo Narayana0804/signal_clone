@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class SendMessageRequest(BaseModel):
     """Request schema for sending a message."""
 
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=10000)
     message_type: str = Field("TEXT", pattern=r"^(TEXT|SYSTEM)$")
     client_id: str | None = Field(None, max_length=64)
     reply_to_id: str | None = Field(None, max_length=64)

@@ -1,8 +1,8 @@
 """WebSocket router for real-time messaging using trusted Origin verification, presence updates, and typing indicators."""
 
-from contextlib import asynccontextmanager, suppress
 import logging
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -250,7 +250,7 @@ async def websocket_endpoint(websocket: WebSocket):
         if not ws_manager.is_user_online(user_id):
             with suppress(BaseException):
                 await notify_presence_change(user_id, "offline")
-    except BaseException as err:
+    except BaseException:
         ws_manager.disconnect(user_id, websocket)
         if not ws_manager.is_user_online(user_id):
             with suppress(BaseException):
