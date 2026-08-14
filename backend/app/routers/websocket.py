@@ -52,11 +52,18 @@ async def notify_presence_change(user_id: str, status_str: str):
                 await db.commit()
 
             contact_repo = ContactRepository(db)
+            conv_repo = ConversationRepository(db)
+
             added_by_users = await contact_repo.get_users_who_added_contact(user_id)
             saved_contacts = await contact_repo.get_user_contacts(user_id)
             saved_user_ids = [c.contact_user_id for c in saved_contacts]
 
-            target_user_ids = list(set(added_by_users + saved_user_ids))
+            user_convs = await conv_repo.get_user_conversations(user_id)
+            co_participants = [
+                p.user_id for conv in user_convs for p in conv.participants if p.user_id != user_id
+            ]
+
+            target_user_ids = list(set(added_by_users + saved_user_ids + co_participants))
             if target_user_ids:
                 await ws_manager.broadcast_to_participants(
                     participant_user_ids=target_user_ids,
