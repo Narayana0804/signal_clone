@@ -33,10 +33,12 @@
   - `ENVIRONMENT`: `production`
 
 ### SQLite Persistence Concern
-- **Railway:** Supports persistent volumes. Mount at `/data/`. SQLite file at `/data/signal.db`.
-- **Render:** Supports persistent disks on paid plans. Mount at `/data/`.
-- **Fly.io:** Alternative. Supports persistent volumes.
-- **CRITICAL:** Verify that the chosen platform does NOT use ephemeral filesystems for the backend. SQLite must survive restarts.
+- **Railway Persistent Volume Setup:**
+  1. Go to Railway Project: `https://railway.com/project/e47ba064-88b9-49ac-9602-3163dde5607c`
+  2. Click **signal-clone-backend** service -> **+ New** -> **Volume**
+  3. Set Mount Path: `/data`
+  4. Set `DATABASE_URL`: `sqlite+aiosqlite:////data/signal.db`
+  5. Once mounted, all user accounts, conversations, and messages will persist permanently across server restarts and redeployments.
 
 ## Environment Variables
 
