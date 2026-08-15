@@ -113,6 +113,75 @@ export function useConversations() {
     }
   };
 
+  const createGroup = async (name: string, participantIds: string[]) => {
+    try {
+      setError(null);
+      const conv = await apiRequest<Conversation>("/conversations/groups", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          participant_ids: participantIds,
+        }),
+      });
+
+      setConversations((prev) => [conv, ...prev]);
+      setSelectedConversationId(conv.id);
+      return conv;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Failed to create group");
+      }
+      throw err;
+    }
+  };
+
+  const addGroupMember = async (conversationId: string, userId: string) => {
+    try {
+      setError(null);
+      const conv = await apiRequest<Conversation>(`/conversations/${conversationId}/members`, {
+        method: "POST",
+        body: JSON.stringify({ user_id: userId }),
+      });
+
+      setConversations((prev) => prev.map((c) => (c.id === conv.id ? conv : c)));
+      if (selectedConversationId === conversationId) {
+        setSelectedConversation(conv);
+      }
+      return conv;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Failed to add group member");
+      }
+      throw err;
+    }
+  };
+
+  const removeGroupMember = async (conversationId: string, userId: string) => {
+    try {
+      setError(null);
+      const conv = await apiRequest<Conversation>(`/conversations/${conversationId}/members/${userId}`, {
+        method: "DELETE",
+      });
+
+      setConversations((prev) => prev.map((c) => (c.id === conv.id ? conv : c)));
+      if (selectedConversationId === conversationId) {
+        setSelectedConversation(conv);
+      }
+      return conv;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("Failed to remove group member");
+      }
+      throw err;
+    }
+  };
+
   const selectConversation = (id: string | null) => {
     setSelectedConversationId(id);
   };
@@ -125,6 +194,9 @@ export function useConversations() {
     error,
     fetchConversations,
     createDirectConversation,
+    createGroup,
+    addGroupMember,
+    removeGroupMember,
     selectConversation,
   };
 }

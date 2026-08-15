@@ -12,6 +12,8 @@ interface ConversationSidebarProps {
   selectedConversationId: string | null;
   onSelectConversation: (id: string) => void;
   onOpenContactsModal: () => void;
+  onOpenCreateGroupModal: () => void;
+  onOpenSettingsModal: () => void;
   currentUser: User | null;
 }
 
@@ -20,6 +22,8 @@ export function ConversationSidebar({
   selectedConversationId,
   onSelectConversation,
   onOpenContactsModal,
+  onOpenCreateGroupModal,
+  onOpenSettingsModal,
   currentUser,
 }: ConversationSidebarProps) {
   const [filterQuery, setFilterQuery] = useState("");
@@ -39,26 +43,30 @@ export function ConversationSidebar({
     <aside className="w-[320px] h-full bg-[var(--color-bg-sidebar)] border-r border-[var(--color-border-primary)] flex flex-col flex-shrink-0">
       {/* Sidebar Top Header */}
       <div className="p-3 border-b border-[var(--color-border-primary)] flex items-center justify-between bg-[var(--color-bg-sidebar)]">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs shadow-xs">
+        <div
+          onClick={onOpenSettingsModal}
+          className="flex items-center gap-2 cursor-pointer group"
+          title="Open Settings"
+        >
+          <div className="w-8 h-8 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:opacity-90 transition-opacity">
             {currentUser ? getInitials(currentUser.display_name) : "S"}
           </div>
-          <span className="font-bold text-sm text-[var(--color-text-primary)] tracking-tight">
+          <span className="font-bold text-sm text-[var(--color-text-primary)] tracking-tight group-hover:text-[var(--color-signal-blue)] transition-colors">
             Signal
           </span>
         </div>
 
         <div className="flex items-center gap-1">
           <button
-            onClick={onOpenContactsModal}
-            title="Contacts & New Chat"
+            onClick={onOpenCreateGroupModal}
+            title="New Group Chat"
             className="p-1.5 rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           >
-            <Users className="w-4 h-4" />
+            <Users className="w-4 h-4 text-[var(--color-signal-blue)]" />
           </button>
           <button
             onClick={onOpenContactsModal}
-            title="New Direct Message"
+            title="Contacts & New Chat"
             className="p-1.5 rounded-[var(--radius-md)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           >
             <SquarePen className="w-4 h-4" />
@@ -74,7 +82,7 @@ export function ConversationSidebar({
             type="text"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder="Search conversations..."
+            placeholder="Search conversations & groups..."
             className="w-full pl-8 pr-3 py-1.5 bg-[var(--color-bg-input)] text-xs rounded-[var(--radius-md)] border border-transparent focus:border-[var(--color-border-primary)] focus:bg-white focus:outline-none transition-all"
           />
         </div>
@@ -90,24 +98,34 @@ export function ConversationSidebar({
               {filterQuery ? "No conversation matches your search query." : "You don't have any conversations yet."}
             </p>
             {!filterQuery && (
-              <button
-                onClick={onOpenContactsModal}
-                className="px-3 py-1.5 bg-[var(--color-signal-blue)] text-white font-medium rounded-[var(--radius-md)] text-xs hover:bg-[var(--color-signal-blue-dark)] transition-colors"
-              >
-                Start a Chat
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onOpenContactsModal}
+                  className="px-3 py-1.5 bg-[var(--color-signal-blue)] text-white font-medium rounded-[var(--radius-md)] text-xs hover:bg-[var(--color-signal-blue-dark)] transition-colors"
+                >
+                  Start Direct Chat
+                </button>
+                <button
+                  onClick={onOpenCreateGroupModal}
+                  className="px-3 py-1.5 bg-emerald-600 text-white font-medium rounded-[var(--radius-md)] text-xs hover:bg-emerald-700 transition-colors"
+                >
+                  New Group
+                </button>
+              </div>
             )}
           </div>
         ) : (
           filteredConversations.map((conv) => {
             const isSelected = conv.id === selectedConversationId;
+            const isGroup = conv.type === "GROUP";
             const displayName =
-              conv.type === "DIRECT" && conv.other_user
-                ? conv.other_user.display_name
-                : conv.name || "Conversation";
+              isGroup
+                ? conv.name || "Group Conversation"
+                : conv.other_user?.display_name || "Conversation";
 
             const otherUserId = conv.type === "DIRECT" ? conv.other_user?.id : undefined;
             const isOnline = otherUserId ? presence[otherUserId]?.status === "online" : false;
+            const hasUnread = (conv.unread_count || 0) > 0;
 
             return (
               <button
@@ -119,10 +137,14 @@ export function ConversationSidebar({
                     : "hover:bg-[var(--color-bg-hover)]"
                 }`}
               >
-                {/* Avatar with presence dot */}
+                {/* Avatar with presence dot / Group Badge */}
                 <div className="relative flex-shrink-0">
-                  <div className="w-10 h-10 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                    {getInitials(displayName)}
+                  <div
+                    className={`w-10 h-10 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs ${
+                      isGroup ? "bg-indigo-600" : "bg-[var(--color-signal-blue)]"
+                    }`}
+                  >
+                    {isGroup ? <Users className="w-5 h-5" /> : getInitials(displayName)}
                   </div>
                   {otherUserId && (
                     <Circle
@@ -136,16 +158,33 @@ export function ConversationSidebar({
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="font-bold text-xs text-[var(--color-text-primary)] truncate">
+                    <span
+                      className={`text-xs truncate ${
+                        hasUnread ? "font-extrabold text-[var(--color-text-primary)]" : "font-bold text-[var(--color-text-primary)]"
+                      }`}
+                    >
                       {displayName}
                     </span>
                     <span className="text-[10px] text-[var(--color-text-tertiary)] flex-shrink-0">
                       {formatTimestamp(conv.updated_at)}
                     </span>
                   </div>
-                  <p className="text-[11px] text-[var(--color-text-secondary)] truncate italic">
-                    {conv.last_message ? conv.last_message.content : "No messages yet"}
-                  </p>
+                  <div className="flex items-center justify-between gap-1">
+                    <p
+                      className={`text-[11px] truncate italic ${
+                        hasUnread ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
+                      }`}
+                    >
+                      {conv.last_message ? conv.last_message.content : "No messages yet"}
+                    </p>
+
+                    {/* Unread Count Badge */}
+                    {hasUnread && (
+                      <span className="px-1.5 py-0.5 bg-[var(--color-signal-blue)] text-white text-[10px] font-bold rounded-full flex-shrink-0">
+                        {conv.unread_count}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );

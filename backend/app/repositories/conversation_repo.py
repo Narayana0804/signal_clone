@@ -116,3 +116,45 @@ class ConversationRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def get_participant(
+        self, conversation_id: str, user_id: str
+    ) -> ConversationParticipant | None:
+        """Get participant record regardless of active status."""
+        stmt = select(ConversationParticipant).where(
+            (ConversationParticipant.conversation_id == conversation_id)
+            & (ConversationParticipant.user_id == user_id)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_active_participant(
+        self, conversation_id: str, user_id: str
+    ) -> ConversationParticipant | None:
+        """Get active participant record."""
+        stmt = select(ConversationParticipant).where(
+            (ConversationParticipant.conversation_id == conversation_id)
+            & (ConversationParticipant.user_id == user_id)
+            & (ConversationParticipant.left_at.is_(None))
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def reactivate_participant(
+        self, participant: ConversationParticipant, role: str = "MEMBER"
+    ) -> ConversationParticipant:
+        """Reactivate a previously left participant."""
+        participant.left_at = None
+        participant.role = role
+        await self.db.flush()
+        return participant
+
+    async def remove_participant(
+        self, participant: ConversationParticipant
+    ) -> ConversationParticipant:
+        """Mark participant as left by setting left_at timestamp."""
+        from app.models.base import utc_now
+
+        participant.left_at = utc_now()
+        await self.db.flush()
+        return participant

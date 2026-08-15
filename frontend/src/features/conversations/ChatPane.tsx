@@ -11,9 +11,11 @@ import {
   AlertCircle,
   WifiOff,
   Circle,
+  Users,
+  Info,
 } from "lucide-react";
 import { Conversation } from "@/hooks/useConversations";
-import { useMessages } from "@/hooks/useMessages";
+import { MessageItem, useMessages } from "@/hooks/useMessages";
 import { useWebSocket, WSEventEnvelope } from "@/hooks/useWebSocket";
 import { useAppStore } from "@/stores/appStore";
 import { formatTimestamp, getInitials } from "@/lib/utils";
@@ -30,9 +32,10 @@ interface ChatPaneProps {
   conversation: Conversation | null;
   currentUser: User | null;
   onIncomingMessage?: (msg: unknown) => void;
+  onOpenGroupDetails?: () => void;
 }
 
-export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
+export function ChatPane({ conversation, currentUser, onOpenGroupDetails }: ChatPaneProps) {
   const [inputText, setInputText] = useState("");
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({}); // user_id -> display_name
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -68,15 +71,15 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
   const handleWSEvent = useCallback(
     (event: WSEventEnvelope) => {
       const { type, payload } = event;
-      if (!conversation) return;
 
       if (type === "message.created") {
-        const msg = payload.message;
-        if (msg && msg.conversation_id === conversation.id) {
+        const msg = payload.message as MessageItem;
+        if (msg.conversation_id === conversation?.id) {
           addIncomingMessage(msg);
-          // Acknowledge delivery if received from another user
-          if (currentUser && msg.sender_id !== currentUser.id) {
+          // Auto-mark as delivered if message from someone else
+          if (msg.sender_id !== currentUser?.id) {
             markAsDelivered(msg.id);
+            markAsRead(msg.id);
           }
           // Clear typing state for message sender (they just sent a message)
           if (msg.sender_id !== currentUser?.id) {
@@ -92,12 +95,12 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
         handleMessageDelivered(message_id, recipient_id);
       } else if (type === "message.read") {
         const { conversation_id, user_id, last_read_message_id } = payload;
-        if (conversation_id === conversation.id) {
+        if (conversation_id === conversation?.id) {
           handleMessageRead(conversation_id, user_id, last_read_message_id);
         }
       } else if (type === "typing.started") {
         const { conversation_id, user_id, display_name } = payload;
-        if (conversation_id === conversation.id && user_id !== currentUser?.id) {
+        if (conversation_id === conversation?.id && user_id !== currentUser?.id) {
           setTypingUsers((prev) => ({ ...prev, [user_id]: display_name || "Someone" }));
 
           // Auto-clear remote typing after timeout (safety net)
@@ -115,7 +118,7 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
         }
       } else if (type === "typing.stopped") {
         const { conversation_id, user_id } = payload;
-        if (conversation_id === conversation.id) {
+        if (conversation_id === conversation?.id) {
           setTypingUsers((prev) => {
             const next = { ...prev };
             delete next[user_id];
@@ -133,115 +136,133 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
       currentUser,
       addIncomingMessage,
       markAsDelivered,
+      markAsRead,
       handleMessageDelivered,
       handleMessageRead,
     ]
   );
 
-  const handleReconnect = useCallback(() => {
-    if (conversation) {
-      fetchMessages(conversation.id);
-    }
-  }, [conversation, fetchMessages]);
-
-  const { status: wsStatus, sendEvent } = useWebSocket(handleWSEvent, handleReconnect);
+  const { isConnected, sendEvent } = useWebSocket(handleWSEvent);
 
   // Auto-scroll to bottom on new messages
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
-  // Mark latest incoming message as read when viewing conversation
+  // Mark unread messages as read when opening conversation
   useEffect(() => {
-    if (messages.length > 0 && currentUser && conversation) {
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg.sender_id !== currentUser.id) {
+    if (conversation && messages.length > 0 && currentUser) {
+      const unreadIncoming = messages.filter(
+        (m) =>
+          m.sender_id !== currentUser.id &&
+          !m.receipts?.some((r) => r.user_id === currentUser.id && r.status === "READ")
+      );
+      if (unreadIncoming.length > 0) {
+        const lastMsg = unreadIncoming[unreadIncoming.length - 1];
         markAsRead(lastMsg.id);
       }
     }
-  }, [messages, currentUser, conversation, markAsRead]);
+  }, [conversation, messages, currentUser, markAsRead]);
 
-  // Handle typing with throttle (send at most once per TYPING_THROTTLE_MS)
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputText(e.target.value);
-    if (!conversation) return;
-
+  // Typing event sender logic
+  const sendTypingStarted = useCallback(() => {
+    if (!conversation || !isConnected) return;
     const now = Date.now();
     if (now - lastTypingSentRef.current >= TYPING_THROTTLE_MS) {
-      sendEvent("typing.started", { conversation_id: conversation.id });
       lastTypingSentRef.current = now;
+      sendEvent("typing.started", { conversation_id: conversation.id });
+    }
+  }, [conversation, isConnected, sendEvent]);
+
+  const sendTypingStopped = useCallback(() => {
+    if (!conversation || !isConnected) return;
+    sendEvent("typing.stopped", { conversation_id: conversation.id });
+    lastTypingSentRef.current = 0;
+  }, [conversation, isConnected, sendEvent]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+    if (!e.target.value.trim()) {
+      if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+      sendTypingStopped();
+      return;
     }
 
-    // Reset auto-stop timer
+    sendTypingStarted();
+
     if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
     typingStopTimerRef.current = setTimeout(() => {
-      sendEvent("typing.stopped", { conversation_id: conversation.id });
-      lastTypingSentRef.current = 0;
+      sendTypingStopped();
     }, TYPING_STOP_DELAY_MS);
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !currentUser || !conversation) return;
-
-    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
-    sendEvent("typing.stopped", { conversation_id: conversation.id });
-    lastTypingSentRef.current = 0;
-
     const text = inputText;
     setInputText("");
+
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    sendTypingStopped();
+
     try {
       await sendMessage(text, currentUser);
     } catch {
-      setInputText(text); // Restore text on failure
+      // Error state handled inside hook
     }
   };
 
   if (!conversation) {
     return (
-      <main className="flex-1 h-full bg-[var(--color-bg-chat)] flex flex-col items-center justify-center p-8 text-center">
-        <div className="w-16 h-16 bg-blue-50 text-[var(--color-signal-blue)] rounded-full flex items-center justify-center mb-4 border border-blue-100 shadow-xs">
-          <MessageSquare className="w-8 h-8" />
-        </div>
-        <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-1">Signal Desktop</h2>
-        <p className="text-xs text-[var(--color-text-secondary)] max-w-sm">
-          Select a conversation from the sidebar or start a new direct chat to begin messaging.
-        </p>
+      <main className="flex-1 h-full bg-[var(--color-bg-chat)] flex flex-col items-center justify-center text-[var(--color-text-secondary)] text-xs">
+        <MessageSquare className="w-12 h-12 text-[var(--color-text-tertiary)] mb-3 stroke-1" />
+        <p className="font-bold text-sm text-[var(--color-text-primary)] mb-1">Select a Conversation</p>
+        <p className="text-xs">Choose a chat from the left sidebar to start messaging.</p>
       </main>
     );
   }
 
-  const otherUser = conversation.type === "DIRECT" ? conversation.other_user : null;
-  const displayName = otherUser ? otherUser.display_name : conversation.name || "Conversation";
-  const subText = otherUser ? otherUser.phone_number : `${conversation.participants.length} participants`;
+  const isGroup = conversation.type === "GROUP";
+  const otherUser = isGroup ? null : conversation.other_user;
+  const displayName = isGroup
+    ? conversation.name || "Group Conversation"
+    : otherUser?.display_name || "Direct Message";
+  const subText = isGroup
+    ? `${conversation.participants.length} members`
+    : otherUser?.phone_number || "";
 
-  // Derive presence for header (DIRECT only)
-  const otherPresence = otherUser ? presence[otherUser.id] : undefined;
+  const otherPresence = otherUser ? presence[otherUser.id] : null;
   const isOnline = otherPresence?.status === "online";
-
   const activeTypingNames = Object.values(typingUsers);
 
   return (
-    <main className="flex-1 h-full bg-[var(--color-bg-chat)] flex flex-col overflow-hidden">
-      {/* Connection Status Banner (if reconnecting/disconnected) */}
-      {wsStatus !== "CONNECTED" && (
-        <div className="bg-amber-500 text-white text-[11px] font-medium py-1 px-3 flex items-center justify-center gap-1.5 shadow-xs">
-          <WifiOff className="w-3.5 h-3.5 animate-pulse" />
-          <span>{wsStatus === "RECONNECTING" ? "Reconnecting to real-time network..." : "Offline — Reconnecting..."}</span>
+    <main className="flex-1 h-full bg-[var(--color-bg-chat)] flex flex-col min-w-0">
+      {/* Reconnection / Offline Banner */}
+      {!isConnected && (
+        <div className="bg-amber-500 text-white text-[11px] font-bold px-3 py-1 flex items-center justify-center gap-1.5 shadow-2xs">
+          <WifiOff className="w-3.5 h-3.5" />
+          <span>Connection lost. Reconnecting to Signal realtime server...</span>
         </div>
       )}
 
-      {/* Chat Top Header */}
-      <div className="p-3 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-sidebar)] flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-3">
-          {/* Avatar with online indicator */}
+      {/* Chat Pane Top Header */}
+      <div className="px-4 py-2.5 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-sidebar)] flex items-center justify-between shadow-2xs">
+        <div
+          onClick={isGroup ? onOpenGroupDetails : undefined}
+          className={`flex items-center gap-3 ${isGroup ? "cursor-pointer group" : ""}`}
+        >
+          {/* Avatar */}
           <div className="relative">
-            <div className="w-9 h-9 rounded-full bg-[var(--color-signal-blue)] text-white flex items-center justify-center font-bold text-xs shadow-xs">
-              {getInitials(displayName)}
+            <div
+              className={`w-9 h-9 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs ${
+                isGroup ? "bg-indigo-600" : "bg-[var(--color-signal-blue)]"
+              }`}
+            >
+              {isGroup ? <Users className="w-5 h-5" /> : getInitials(displayName)}
             </div>
             {otherUser && (
               <Circle
@@ -252,9 +273,16 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
             )}
           </div>
           <div>
-            <h2 className="font-bold text-xs text-[var(--color-text-primary)]">{displayName}</h2>
+            <h2 className={`font-bold text-xs text-[var(--color-text-primary)] ${isGroup ? "group-hover:text-[var(--color-signal-blue)] transition-colors" : ""}`}>
+              {displayName}
+            </h2>
             <p className="text-[10px] text-[var(--color-text-secondary)]">
-              {otherUser ? (
+              {isGroup ? (
+                <span className="font-medium text-indigo-600 flex items-center gap-1">
+                  <span>{subText}</span>
+                  <Info className="w-3 h-3 text-indigo-400" />
+                </span>
+              ) : otherUser ? (
                 isOnline ? (
                   <span className="text-emerald-600 font-medium">Online</span>
                 ) : otherPresence?.last_seen_at ? (
@@ -285,7 +313,7 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
       )}
 
       {/* Messages List Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-0.5">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full text-xs text-[var(--color-text-secondary)] gap-2">
             <Loader2 className="w-5 h-5 animate-spin text-[var(--color-signal-blue)]" />
@@ -298,15 +326,23 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
             <p className="text-[11px]">Send a message below to start your conversation with {displayName}.</p>
           </div>
         ) : (
-          messages.map((msg) => {
+          messages.map((msg, index) => {
             const isMe = currentUser ? msg.sender_id === currentUser.id : false;
             const isRead = msg.receipts?.some((r) => r.status === "READ");
             const isDelivered = msg.receipts?.some((r) => r.status === "DELIVERED" || r.status === "READ");
 
+            // Visual message grouping: check if previous message was sent by same user within 5 minutes
+            const prevMsg = index > 0 ? messages[index - 1] : null;
+            const isSameSender = prevMsg ? prevMsg.sender_id === msg.sender_id : false;
+            const isCloseInTime = prevMsg
+              ? Math.abs(new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime()) < 5 * 60 * 1000
+              : false;
+            const isGrouped = isSameSender && isCloseInTime;
+
             return (
               <div
                 key={msg.id}
-                className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                className={`flex flex-col ${isMe ? "items-end" : "items-start"} ${isGrouped ? "mt-0.5" : "mt-3"}`}
               >
                 <div
                   className={`max-w-[70%] px-3.5 py-2.5 rounded-[var(--radius-md)] shadow-2xs text-xs ${
@@ -315,7 +351,7 @@ export function ChatPane({ conversation, currentUser }: ChatPaneProps) {
                       : "bg-white text-[var(--color-text-primary)] border border-[var(--color-border-light)] rounded-bl-xs"
                   } ${msg.isOptimistic ? "opacity-70" : ""}`}
                 >
-                  {!isMe && conversation.type === "GROUP" && (
+                  {!isMe && isGroup && !isGrouped && (
                     <span className="block font-bold text-[11px] text-[var(--color-signal-blue)] mb-0.5">
                       {msg.sender.display_name}
                     </span>

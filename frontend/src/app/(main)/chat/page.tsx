@@ -10,12 +10,16 @@ import { useAppStore } from "@/stores/appStore";
 import { ConversationSidebar } from "@/features/conversations/ConversationSidebar";
 import { ChatPane } from "@/features/conversations/ChatPane";
 import { ContactList } from "@/features/contacts/ContactList";
+import { CreateGroupModal } from "@/features/groups/CreateGroupModal";
+import { GroupDetailsModal } from "@/features/groups/GroupDetailsModal";
+import { SettingsModal } from "@/features/groups/SettingsModal";
+import { Toast, ToastProps } from "@/components/Toast";
 import { X, MessageSquarePlus } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 
 export default function ChatPage() {
   const router = useRouter();
-  const { currentUser, loading: authLoading } = useAuth();
+  const { currentUser, loading: authLoading, fetchMe } = useAuth();
   const updatePresence = useAppStore((state) => state.updatePresence);
   const {
     conversations,
@@ -23,11 +27,18 @@ export default function ChatPage() {
     selectedConversationId,
     selectConversation,
     createDirectConversation,
+    createGroup,
+    addGroupMember,
+    removeGroupMember,
     fetchConversations,
   } = useConversations();
   const { contacts } = useContacts();
 
   const [showContactsModal, setShowContactsModal] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showGroupDetailsModal, setShowGroupDetailsModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [toast, setToast] = useState<Omit<ToastProps, "onClose"> | null>(null);
 
   // Page-level WebSocket event handler (presence + conversation list updates)
   const handleWSEvent = useCallback(
@@ -35,7 +46,10 @@ export default function ChatPage() {
       if (
         event.type === "message.created" ||
         event.type === "message.read" ||
-        event.type === "conversation.created"
+        event.type === "conversation.created" ||
+        event.type === "group.created" ||
+        event.type === "group.member_added" ||
+        event.type === "group.member_removed"
       ) {
         fetchConversations();
       }
@@ -80,6 +94,21 @@ export default function ChatPage() {
     }
   };
 
+  const handleCreateGroup = async (name: string, participantIds: string[]) => {
+    await createGroup(name, participantIds);
+    setToast({ type: "success", message: `Group "${name}" created successfully!` });
+  };
+
+  const handleAddMember = async (conversationId: string, userId: string) => {
+    await addGroupMember(conversationId, userId);
+    setToast({ type: "success", message: "Member added to group" });
+  };
+
+  const handleRemoveMember = async (conversationId: string, userId: string) => {
+    await removeGroupMember(conversationId, userId);
+    setToast({ type: "success", message: "Member removed from group" });
+  };
+
   return (
     <div className="h-screen w-screen overflow-hidden flex bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]">
       {/* Signal Desktop Sidebar */}
@@ -88,11 +117,53 @@ export default function ChatPage() {
         selectedConversationId={selectedConversationId}
         onSelectConversation={selectConversation}
         onOpenContactsModal={() => setShowContactsModal(true)}
+        onOpenCreateGroupModal={() => setShowCreateGroupModal(true)}
+        onOpenSettingsModal={() => setShowSettingsModal(true)}
         currentUser={currentUser}
       />
 
       {/* Main Chat View */}
-      <ChatPane conversation={selectedConversation} currentUser={currentUser} />
+      <ChatPane
+        conversation={selectedConversation}
+        currentUser={currentUser}
+        onOpenGroupDetails={() => setShowGroupDetailsModal(true)}
+      />
+
+      {/* Toast Notifications */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Create Group Modal */}
+      <CreateGroupModal
+        isOpen={showCreateGroupModal}
+        onClose={() => setShowCreateGroupModal(false)}
+        onCreateGroup={handleCreateGroup}
+      />
+
+      {/* Group Details Modal */}
+      {selectedConversation && (
+        <GroupDetailsModal
+          isOpen={showGroupDetailsModal}
+          onClose={() => setShowGroupDetailsModal(false)}
+          conversation={selectedConversation}
+          currentUser={currentUser}
+          onAddMember={handleAddMember}
+          onRemoveMember={handleRemoveMember}
+        />
+      )}
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        currentUser={currentUser}
+        onProfileUpdated={fetchMe}
+      />
 
       {/* Contacts / Start Chat Modal */}
       {showContactsModal && (

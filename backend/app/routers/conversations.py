@@ -11,14 +11,17 @@ from app.models.conversation import Conversation
 from app.models.user import User
 from app.repositories.message_repo import MessageRepository
 from app.schemas.conversation import (
+    AddGroupMemberRequest,
     ConversationListResponse,
     ConversationResponse,
     CreateConversationRequest,
+    CreateGroupRequest,
     LastMessagePreview,
     ParticipantResponse,
 )
 from app.schemas.user import UserResponse
 from app.services.conversation_service import ConversationService
+from app.websockets.manager import ws_manager
 
 router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 
@@ -31,6 +34,8 @@ async def build_conversation_response(
     other_user_out = None
 
     for p in conv.participants:
+        if p.left_at is not None:
+            continue
         user_res = UserResponse.model_validate(p.user)
         participants_out.append(
             ParticipantResponse(
@@ -70,11 +75,12 @@ async def build_conversation_response(
         id=conv.id,
         type=conv.type,
         name=display_name,
-        avatar_url=conv.avatar_url or (other_user_out.avatar_url if other_user_out else None),
+        avatar_url=conv.avatar_url
+        or (other_user_out.avatar_url if other_user_out and conv.type == "DIRECT" else None),
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         participants=participants_out,
-        other_user=other_user_out,
+        other_user=other_user_out if conv.type == "DIRECT" else None,
         last_message=last_msg_out,
         unread_count=unread_count,
     )
@@ -91,7 +97,7 @@ async def create_conversation(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ConversationResponse:
-    """Create a new DIRECT conversation or return existing conversation between the pair."""
+    """Create a new DIRECT or GROUP conversation."""
     service = ConversationService(db)
 
     if req.type == "DIRECT":
@@ -112,10 +118,147 @@ async def create_conversation(
 
         return await build_conversation_response(conv, current_user.id, db)
 
+    if req.type == "GROUP":
+        if not req.name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Group name is required",
+            )
+        conv = await service.create_group_conversation(
+            creator_id=current_user.id,
+            name=req.name,
+            participant_ids=req.participant_ids,
+        )
+        response.status_code = status.HTTP_201_CREATED
+        conv_res = await build_conversation_response(conv, current_user.id, db)
+
+        # Broadcast group.created event via WebSocket
+        target_ids = [
+            p.user_id
+            for p in conv.participants
+            if p.user_id != current_user.id and p.left_at is None
+        ]
+        if target_ids:
+            await ws_manager.broadcast_to_participants(
+                participant_user_ids=target_ids,
+                event_type="group.created",
+                payload={"conversation": conv_res.model_dump()},
+            )
+
+        return conv_res
+
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Group conversations are not yet implemented in Phase 4",
+        detail="Invalid conversation type",
     )
+
+
+@router.post(
+    "/groups",
+    response_model=ConversationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new group conversation",
+)
+async def create_group(
+    req: CreateGroupRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ConversationResponse:
+    """Dedicated endpoint to create a new GROUP conversation."""
+    service = ConversationService(db)
+    conv = await service.create_group_conversation(
+        creator_id=current_user.id,
+        name=req.name,
+        participant_ids=req.participant_ids,
+    )
+    conv_res = await build_conversation_response(conv, current_user.id, db)
+
+    # Broadcast group.created event via WebSocket
+    target_ids = [
+        p.user_id for p in conv.participants if p.user_id != current_user.id and p.left_at is None
+    ]
+    if target_ids:
+        await ws_manager.broadcast_to_participants(
+            participant_user_ids=target_ids,
+            event_type="group.created",
+            payload={"conversation": conv_res.model_dump()},
+        )
+
+    return conv_res
+
+
+@router.post(
+    "/{conversation_id}/members",
+    response_model=ConversationResponse,
+    summary="Add a member to a group conversation",
+)
+async def add_group_member(
+    conversation_id: str,
+    req: AddGroupMemberRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ConversationResponse:
+    """Add a target user to an existing group conversation (Admin only)."""
+    service = ConversationService(db)
+    conv = await service.add_group_member(
+        requester_id=current_user.id,
+        conversation_id=conversation_id,
+        target_user_id=req.user_id,
+    )
+    conv_res = await build_conversation_response(conv, current_user.id, db)
+
+    # Broadcast group.member_added and group.updated
+    active_user_ids = [p.user_id for p in conv.participants if p.left_at is None]
+    added_p = next((p for p in conv_res.participants if p.user_id == req.user_id.strip()), None)
+    if active_user_ids:
+        await ws_manager.broadcast_to_participants(
+            participant_user_ids=active_user_ids,
+            event_type="group.member_added",
+            payload={
+                "conversation_id": conversation_id,
+                "member": added_p.model_dump() if added_p else None,
+                "conversation": conv_res.model_dump(),
+            },
+        )
+
+    return conv_res
+
+
+@router.delete(
+    "/{conversation_id}/members/{user_id}",
+    response_model=ConversationResponse,
+    summary="Remove a member from a group conversation",
+)
+async def remove_group_member(
+    conversation_id: str,
+    user_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ConversationResponse:
+    """Remove a target user from a group conversation (Admin only)."""
+    service = ConversationService(db)
+    conv = await service.remove_group_member(
+        requester_id=current_user.id,
+        conversation_id=conversation_id,
+        target_user_id=user_id,
+    )
+    conv_res = await build_conversation_response(conv, current_user.id, db)
+
+    # Broadcast group.member_removed to remaining active participants plus the removed user
+    active_user_ids = [p.user_id for p in conv.participants if p.left_at is None]
+    notify_ids = list(set([*active_user_ids, user_id]))
+    if notify_ids:
+        await ws_manager.broadcast_to_participants(
+            participant_user_ids=notify_ids,
+            event_type="group.member_removed",
+            payload={
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "conversation": conv_res.model_dump(),
+            },
+        )
+
+    return conv_res
 
 
 @router.get(

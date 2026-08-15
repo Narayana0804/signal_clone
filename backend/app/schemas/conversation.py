@@ -13,6 +13,19 @@ class CreateConversationRequest(BaseModel):
     participant_ids: list[str] = Field(..., min_length=1)
 
 
+class CreateGroupRequest(BaseModel):
+    """Request schema for creating a new group conversation."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    participant_ids: list[str] = Field(..., min_length=1)
+
+
+class AddGroupMemberRequest(BaseModel):
+    """Request schema for adding a member to an existing group."""
+
+    user_id: str = Field(..., min_length=1)
+
+
 class ParticipantResponse(BaseModel):
     """Response schema for a conversation participant."""
 
