@@ -1,4 +1,4 @@
-"""FastAPI application entry point — Production v1.1.0 (Group Messaging & Member Management Enabled)."""
+"""FastAPI application entry point — Production v1.2.0 (Group Messaging & Member Management Enabled)."""
 
 import logging
 from contextlib import asynccontextmanager
