@@ -14,7 +14,7 @@ import { CreateGroupModal } from "@/features/groups/CreateGroupModal";
 import { GroupDetailsModal } from "@/features/groups/GroupDetailsModal";
 import { SettingsModal } from "@/features/groups/SettingsModal";
 import { Toast, ToastProps } from "@/components/Toast";
-import { X, MessageSquarePlus } from "lucide-react";
+import { X, MessageSquarePlus, Users } from "lucide-react";
 import { getInitials } from "@/lib/utils";
 
 export default function ChatPage() {
@@ -170,10 +170,22 @@ export default function ChatPage() {
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="relative w-full max-w-lg bg-[var(--color-bg-primary)] rounded-[var(--radius-lg)] shadow-[var(--shadow-modal)] border border-[var(--color-border-primary)] overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] flex items-center justify-between">
-              <h2 className="font-bold text-sm text-[var(--color-text-primary)] flex items-center gap-2">
-                <MessageSquarePlus className="w-4 h-4 text-[var(--color-signal-blue)]" />
-                Start a New Direct Chat
-              </h2>
+              <div className="flex items-center gap-3">
+                <h2 className="font-bold text-sm text-[var(--color-text-primary)] flex items-center gap-2">
+                  <MessageSquarePlus className="w-4 h-4 text-[var(--color-signal-blue)]" />
+                  Start a Chat
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowContactsModal(false);
+                    setShowCreateGroupModal(true);
+                  }}
+                  className="px-2.5 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 text-xs font-bold rounded-[var(--radius-md)] flex items-center gap-1 transition-colors"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>New Group Chat</span>
+                </button>
+              </div>
               <button
                 onClick={() => setShowContactsModal(false)}
                 className="p-1 rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
