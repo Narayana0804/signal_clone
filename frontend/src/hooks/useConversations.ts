@@ -116,9 +116,11 @@ export function useConversations() {
   const createGroup = async (name: string, participantIds: string[]) => {
     try {
       setError(null);
-      const conv = await apiRequest<Conversation>("/conversations/groups", {
+      // Use POST /conversations with type:GROUP (compatible with deployed Railway backend)
+      const conv = await apiRequest<Conversation>("/conversations", {
         method: "POST",
         body: JSON.stringify({
+          type: "GROUP",
           name,
           participant_ids: participantIds,
         }),
